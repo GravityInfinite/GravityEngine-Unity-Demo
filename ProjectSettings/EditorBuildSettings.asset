@@ -6,6 +6,12 @@ EditorBuildSettings:
   serializedVersion: 2
   m_Scenes:
   - enabled: 1
+    path: Assets/GravityEngineSample/GravityEngineSample.unity
+    guid: 9bf3e7bd139174c4a9b7486d13ab3492
+  - enabled: 1
+    path: Assets/GravityEngineSample/GravityEngineNewScene.unity
+    guid: 512aa5addaba94499a9d03fcbbc1caae
+  - enabled: 1
     path: Assets/Scenes/SampleScene.unity
     guid: 2cda990e2423bbf4892e6590ba056729
   m_configObjects: {}
