@@ -1,0 +1,39 @@
+pluginManagement {
+    repositories {
+        **ARTIFACTORYREPOSITORY**
+        gradlePluginPortal()
+        google()
+        mavenCentral()
+    }
+}
+
+include ':launcher', ':unityLibrary'
+**INCLUDES**
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
+    repositories {
+        **ARTIFACTORYREPOSITORY**
+        google()
+        mavenCentral()
+// Android Resolver Repos Start
+        def unityProjectPath = $/file:///**DIR_UNITYPROJECT**/$.replace("\\", "/")
+        maven {
+            url "https://nexus.gravity-engine.com/repository/maven-releases/" // Assets/GravityNet/Android/Editor/Dependencies.xml:9
+        }
+        maven {
+            url "https://developer.huawei.com/repo/" // Assets/GravityNet/GravityPlugins/Oaid/Editor/Dependencies.xml:8
+        }
+        maven {
+            url "https://developer.hihonor.com/repo" // Assets/GravityNet/GravityPlugins/Oaid/Editor/Dependencies.xml:15
+        }
+        maven {
+            url "https://nexus.gravity-engine.com/repository/maven-snapshots/" // Assets/GravityNet/Android/Editor/Dependencies.xml:9
+        }
+        mavenLocal()
+// Android Resolver Repos End
+        flatDir {
+            dirs "${project(':unityLibrary').projectDir}/libs"
+        }
+    }
+}
