@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<dependencies>
+  <androidPackages>
+    <androidPackage spec="cn.gravity.android:GravityEngineSDK:+">
+      <repositories>
+        <repository>https://nexus.gravity-engine.com/repository/maven-releases/</repository>
+        <repository>https://nexus.gravity-engine.com/repository/maven-snapshots/</repository>
+      </repositories>
+    </androidPackage>
+  </androidPackages>
+</dependencies>
