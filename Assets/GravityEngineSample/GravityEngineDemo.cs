@@ -8,10 +8,11 @@ using GravityEngine.Utils;
 using GravitySDK.PC.Constant;
 using GravitySDK.PC.GravityTurbo;
 using GravitySDK.PC.Utils;
+using GravityEngine.Wrapper;
 
 #if GRAVITY_WECHAT_GAME_MODE || GRAVITY_BILIBILI_GAME_MODE || GRAVITY_MEITUAN_GAME_MODE
 using WeChatWASM;
-#elif GRAVITY_BYTEDANCE_GAME_MODE
+#elif GRAVITY_BYTEDANCE_GAME_MODE || GRAVITY_BYTEDANCE_CLOUD_MODE
 using StarkSDKSpace;
 #elif GRAVITY_BYTEDANCE_TT_GAME_MODE
 using TTSDK;
@@ -62,16 +63,18 @@ public class QueryDryRunCallbackImpl : IQueryDryRunCallback
 {
     public void onFailed(string errorMsg)
     {
-        Debug.Log("query failed  with message " + errorMsg);
+        Debug.Log("QueryDryRunCallbackImpl query failed  with message " + errorMsg);
     }
 
-    public void onEmpty()
+    public void onEmpty(GravityEngineAPI.DryRunEventEmpty dryRunEventEmpty)
     {
+        Debug.Log("QueryDryRunCallbackImpl  onEmpty:" + dryRunEventEmpty);
         // 当前未查询到需要给媒体上报的付费事件
     }
 
     public void onTrackPay(int backValue, string company, Dictionary<string, object> otherParams)
     {
+        Debug.Log("QueryDryRunCallbackImpl  onTrackPay:"+ company+" - " + backValue);
         // 可以从otherParams中解析自己传入的参数使用
         if (company.Equals("bytedance"))
         {
@@ -86,6 +89,7 @@ public class QueryDryRunCallbackImpl : IQueryDryRunCallback
 
     public void onTrackKeyActive(string company, Dictionary<string, object> otherParams)
     {
+        Debug.Log("QueryDryRunCallbackImpl  onTrackKeyActive:" + company);
         // 可以从otherParams中解析自己传入的参数使用
         if (company.Equals("bytedance"))
         {
@@ -129,7 +133,7 @@ public class GravityEngineDemo : MonoBehaviour, IDynamicSuperProperties
     {
 #if GRAVITY_WECHAT_GAME_MODE || GRAVITY_BILIBILI_GAME_MODE || GRAVITY_MEITUAN_GAME_MODE
         WXBase.InitSDK((code) => { Debug.Log("wx init end"); });
-#elif GRAVITY_BYTEDANCE_GAME_MODE
+#elif GRAVITY_BYTEDANCE_GAME_MODE || GRAVITY_BYTEDANCE_CLOUD_MODE
         StarkSDK.Init();
         StarkSDK.API.SetContainerInitCallback((env =>
         {
@@ -173,27 +177,24 @@ public class GravityEngineDemo : MonoBehaviour, IDynamicSuperProperties
             // 手动初始化（动态挂载 GravityEngineAPI 脚本）
             new GameObject("GravityEngine", typeof(GravityEngineAPI));
 
-#if GRAVITY_WECHAT_GAME_MODE || GRAVITY_BILIBILI_GAME_MODE || GRAVITY_MEITUAN_GAME_MODE
-            //微信小游戏示例
-            //设置实例参数并启动引擎，将以下三个参数修改成您应用对应的参数，参数可以在引力后台--管理中心--应用管理中查看
-            string accessToken = "gZGljPsq7I4wc3BMvkAUsevQznx1jahi";
-            string clientId = "1234567890067";
-            
-            // 启动引力引擎
-            GravityEngineAPI.StartGravityEngine(accessToken, clientId, GravityEngineAPI.SDKRunMode.DEBUG);
-            // 微信小游戏开启自动采集，并设置自定属性
-            GravityEngineAPI.EnableAutoTrack(AUTO_TRACK_EVENTS.WECHAT_GAME_ALL, new Dictionary<string, object>()
-            {
-                {"auto_track_key", "auto_track_value"} // 静态属性
-            });
-#elif UNITY_ANDROID && !UNITY_EDITOR && !GRAVITY_BYTEDANCE_GAME_MODE && !GRAVITY_BYTEDANCE_TT_GAME_MODE && !GRAVITY_KUAISHOU_GAME_MODE && !GRAVITY_KUAISHOU_WEBGL_GAME_MODE && !GRAVITY_OPPO_GAME_MODE && !GRAVITY_HUAWEI_GAME_MODE && !GRAVITY_XIAOMI_GAME_MODE && !GRAVITY_ALIPAY_GAME_MODE
+#if UNITY_ANDROID && !UNITY_EDITOR && !GRAVITY_BYTEDANCE_CLOUD_MODE
             //Android原生应用示例
             //设置实例参数并启动引擎，将以下三个参数修改成您应用对应的参数，参数可以在引力后台--管理中心--应用管理中查看
-            string accessToken = "x5emsWAxqnlwqpDH1j4bbicR8igmhruT";
-            string clientId = "1234567890067";
+            string accessToken = "Fyt7qWJbEScP9emlljwnRI6uej3fBnia";
+            string clientId = "default_placeholder";
+
+            GravityEngineAPI.Token token = new GravityEngineAPI.Token(accessToken, clientId, "xiaomi");
+            token.mode = GravityEngineAPI.SDKRunMode.DEBUG;
+
+            //默认取 OAID 为clientId,如果想设置AndroidId优先，需要进行mClientIdPriorityOrder的设置
+            token.mClientIdPriorityOrder = new List<GravityEngineAPI.AndroidClientIdType>() { GravityEngineAPI.AndroidClientIdType.ANDROID_ID, GravityEngineAPI.AndroidClientIdType.OAID };
+
+            //设置前台会话阀值（频繁切换前后台，AppEnd时间会很小，可以设置这个值忽略这种操作）当AppEnd发生时，事件少于设置的time，会忽略计时
+            //token.foregroundSessionThreshold = 10;
 
             // 启动引力引擎
-            GravityEngineAPI.StartGravityEngine(accessToken, clientId, GravityEngineAPI.SDKRunMode.DEBUG, "xiaomi");
+            GravityEngineAPI.StartGravityEngine(token);
+            //GravityEngineAPI.StartGravityEngine(accessToken, clientId, GravityEngineAPI.SDKRunMode.DEBUG, "xiaomi");
             // 原生app开启自动采集，并设置自定属性
             GravityEngineAPI.EnableAutoTrack(AUTO_TRACK_EVENTS.APP_ALL, new Dictionary<string, object>()
             {
@@ -202,7 +203,7 @@ public class GravityEngineDemo : MonoBehaviour, IDynamicSuperProperties
 #elif UNITY_IOS && !UNITY_EDITOR
             //iOS原生应用示例
             //设置实例参数并启动引擎，将以下三个参数修改成您应用对应的参数，参数可以在引力后台--管理中心--应用管理中查看
-            string accessToken = "HuyP3wz0exklCr2YhoKht9Ju8fUjiBjs";
+            string accessToken = "C7GkLEgnRqiMnpvguAsoYemxkKoea3wt";
             string clientId = "default_placeholder";
 
             // 启动引力引擎
@@ -212,7 +213,43 @@ public class GravityEngineDemo : MonoBehaviour, IDynamicSuperProperties
             {
                 {"auto_track_key", "auto_track_value"} // 静态属性
             });
-#elif GRAVITY_BYTEDANCE_GAME_MODE || GRAVITY_BYTEDANCE_TT_GAME_MODE
+#elif UNITY_OPENHARMONY && !UNITY_EDITOR
+            // 鸿蒙原生应用示例
+            // 设置实例参数并启动引擎，将以下三个参数修改成您应用对应的参数，参数可以在引力后台--管理中心--应用管理中查看
+            string accessToken = "inl6nupvOoVPxC0ebhZW3jMtYl2s4KBt";
+            string clientId = "default_placeholder";//如果需要自定义clientId，这里必须传，否则将会使用自动生成的clientId
+            // 鸿蒙启动引力引擎
+            Debug.Log("StartGravityEngine clicked");
+
+            GravityEngineAPI.Token token = new GravityEngineAPI.Token(accessToken, clientId, "harmony");
+            token.mode = GravityEngineAPI.SDKRunMode.DEBUG;
+
+            //默认取 OAID 为clientId,如果想设置AndroidId优先，需要进行mClientIdPriorityOrder的设置
+            token.mClientIdPriorityOrder = new List<GravityEngineAPI.AndroidClientIdType>() { GravityEngineAPI.AndroidClientIdType.ANDROID_ID, GravityEngineAPI.AndroidClientIdType.OAID };
+
+            // 启动引力引擎
+            GravityEngineAPI.StartGravityEngine(token);
+
+            //GravityEngineAPI.StartGravityEngine(accessToken, clientId, GravityEngineAPI.SDKRunMode.DEBUG, "harmony");
+            // 原生app开启自动采集，并设置自定属性
+            GravityEngineAPI.EnableAutoTrack(AUTO_TRACK_EVENTS.APP_ALL, new Dictionary<string, object>()
+            {
+                {"auto_track_key", "auto_track_value"} // 静态属性
+            });
+#elif GRAVITY_WECHAT_GAME_MODE || GRAVITY_BILIBILI_GAME_MODE || GRAVITY_MEITUAN_GAME_MODE
+            //微信小游戏示例
+            //设置实例参数并启动引擎，将以下三个参数修改成您应用对应的参数，参数可以在引力后台--管理中心--应用管理中查看
+            string accessToken = "gZGljPsq7I4wc3BMvkAUsevQznx1jahi";
+            string clientId = "1234567890067";
+            
+            // 启动引力引擎
+            GravityEngineAPI.StartGravityEngine(accessToken, clientId, GravityEngineAPI.SDKRunMode.DEBUG);
+            // 微信小游戏开启自动采集，并设置自定属性
+            GravityEngineAPI.EnableAutoTrack(AUTO_TRACK_EVENTS.MINI_GAME_ALL, new Dictionary<string, object>()
+            {
+                {"auto_track_key", "auto_track_value"} // 静态属性
+            });
+#elif GRAVITY_BYTEDANCE_GAME_MODE || GRAVITY_BYTEDANCE_CLOUD_MODE || GRAVITY_BYTEDANCE_TT_GAME_MODE 
             //抖音小游戏示例
             //设置实例参数并启动引擎，将以下三个参数修改成您应用对应的参数，参数可以在引力后台--管理中心--应用管理中查看
             string accessToken = "z4gcI6n1O52DRibPXZfjvn8w3YVtLUqp";
@@ -221,7 +258,7 @@ public class GravityEngineDemo : MonoBehaviour, IDynamicSuperProperties
             // 启动引力引擎
             GravityEngineAPI.StartGravityEngine(accessToken, clientId, GravityEngineAPI.SDKRunMode.DEBUG);
             // 微信小游戏开启自动采集，并设置自定属性
-            GravityEngineAPI.EnableAutoTrack(AUTO_TRACK_EVENTS.BYTEDANCE_GAME_ALL, new Dictionary<string, object>()
+            GravityEngineAPI.EnableAutoTrack(AUTO_TRACK_EVENTS.MINI_GAME_ALL, new Dictionary<string, object>()
             {
                 {"auto_track_key", "auto_track_value"} // 静态属性
             });
@@ -230,11 +267,18 @@ public class GravityEngineDemo : MonoBehaviour, IDynamicSuperProperties
             //设置实例参数并启动引擎，将以下三个参数修改成您应用对应的参数，参数可以在引力后台--管理中心--应用管理中查看
             string accessToken = "TZNwFfKUsvgyInVhQiydg6lpx5aWYk0r";
             string clientId = "123456789";
+            GE_Log.EnableLog(true);
+            GravityWrapperManager.EnableLog(true);
+
+            GravityEngineAPI.Token token = new GravityEngineAPI.Token(accessToken, clientId, "kuaishou");
+            token.enableCrashToGe = true;
+            token.enableCrashTo3D = true;
+
 
             // 启动引力引擎
-            GravityEngineAPI.StartGravityEngine(accessToken, clientId, GravityEngineAPI.SDKRunMode.DEBUG);
+            GravityEngineAPI.StartGravityEngine(token);
             // 快手小游戏开启自动采集，并设置自定属性
-            GravityEngineAPI.EnableAutoTrack(AUTO_TRACK_EVENTS.KUAISHOU_GAME_ALL, new Dictionary<string, object>()
+            GravityEngineAPI.EnableAutoTrack(AUTO_TRACK_EVENTS.MINI_GAME_ALL, new Dictionary<string, object>()
             {
                 {"auto_track_key", "auto_track_value"} // 静态属性
             });
@@ -247,11 +291,11 @@ public class GravityEngineDemo : MonoBehaviour, IDynamicSuperProperties
             // 启动引力引擎
             GravityEngineAPI.StartGravityEngine(accessToken, clientId, GravityEngineAPI.SDKRunMode.DEBUG);
             // 支付宝小游戏开启自动采集，并设置自定属性
-            GravityEngineAPI.EnableAutoTrack(AUTO_TRACK_EVENTS.KUAISHOU_GAME_ALL, new Dictionary<string, object>()
+            GravityEngineAPI.EnableAutoTrack(AUTO_TRACK_EVENTS.MINI_GAME_ALL, new Dictionary<string, object>()
             {
                 {"auto_track_key", "auto_track_value"} // 静态属性
             });
-#elif GRAVITY_OPPO_GAME_MODE || GRAVITY_HUAWEI_GAME_MODE || GRAVITY_XIAOMI_GAME_MODE
+#elif GRAVITY_OPPO_GAME_MODE || GRAVITY_HUAWEI_GAME_MODE || GRAVITY_XIAOMI_GAME_MODE || GRAVITY_VIVO_GAME_MODE
             //快游戏示例
             //设置实例参数并启动引擎，将以下三个参数修改成您应用对应的参数，参数可以在引力后台--管理中心--应用管理中查看
             string accessToken = "TZNwFfKUsvgyInVhQiydg6lpx5aWYk0r";
@@ -260,35 +304,47 @@ public class GravityEngineDemo : MonoBehaviour, IDynamicSuperProperties
             // 启动引力引擎
             GravityEngineAPI.StartGravityEngine(accessToken, clientId, GravityEngineAPI.SDKRunMode.DEBUG);
             // 快手小游戏开启自动采集，并设置自定属性
-            GravityEngineAPI.EnableAutoTrack(AUTO_TRACK_EVENTS.QUICK_GAME_ALL, new Dictionary<string, object>()
+            GravityEngineAPI.EnableAutoTrack(AUTO_TRACK_EVENTS.MINI_GAME_ALL, new Dictionary<string, object>()
             {
                 {"auto_track_key", "auto_track_value"} // 静态属性
             });
-#elif UNITY_EDITOR
+#else
             // Unity Editor
             // 设置实例参数并启动引擎，将以下三个参数修改成您应用对应的参数，参数可以在引力后台--管理中心--应用管理中查看
-            string accessToken = "T2gpvyuRdBoGaz4OnqbW0SZvEjiKhMtH";
-            string clientId = "1234567890067";
+            string accessToken = "lIghKiBW27uExuhmpedSUsvwFzpYtO6k";
+            string clientId = "GygsyrvKJGEUFgiwvieWin-001";
             // 启动引力引擎
-            GravityEngineAPI.StartGravityEngine(accessToken, clientId, GravityEngineAPI.SDKRunMode.DEBUG, "xiaomi");
+            Debug.Log("StartGravityEngine clicked 1");
+            GravityEngineAPI.StartGravityEngine(accessToken, clientId, GravityEngineAPI.SDKRunMode.NORMAL, "windows");
 #endif
+            GE_Log.EnableLog(true);
+            GravityWrapperManager.EnableLog(true);
         }
 
         GUILayout.Space(20);
         if (GUILayout.Button("Initialize", GUILayout.Height(Height)))
         {
-            string clientId = "123456789";
-#if UNITY_IOS && !UNITY_EDITOR
-            // iOS原生应用注册
-            string caid1Md5 = "123456789";
-            string caid2Md5 = "123456789";
-            GravityEngineAPI.InitializeIOS(false, clientId, caid1Md5, caid2Md5, true, "appstore",new InitializeCallbackImpl());
-#else
             Debug.Log("initialize clicked");
-            GravityEngineAPI.Initialize(clientId,"name_123", 1, "123456789", true, new InitializeCallbackImpl());
+            string clientId = "";
+#if UNITY_IOS && !UNITY_EDITOR
+            // iOS原生应用注册\\
+            string caidStr = "[{\"version\":\"20220111\",\"caid\":\"912ec803b2ce49e4a541068d495ab570\"},{\"version\":\"20211207\",\"caid\":\"e332a76c29654fcb7f6e6b31ced090c7\"}]";
+            GravityEngineAPI.InitializeIOS(false, clientId, caidStr, true, "appstore",new InitializeCallbackImpl());
+#else
+            GravityEngineAPI.Initialize(clientId,"name_123", 1, "", false, new InitializeCallbackImpl());
 #endif
         }
-        
+        GUILayout.Space(20);
+
+        if (GUILayout.Button("UpdateUserInfo", GUILayout.Height(Height)))
+        {
+            Dictionary<string, object> properties = new Dictionary<string, object>();
+            properties["channel"] = "changeChannelTest";
+            properties["name"] = "changeNameTest";
+            properties["version"] = 5;
+            GravityEngineAPI.UpdateUserInfo(properties);
+        }
+
         GUILayout.Space(20);
         
         if (GUILayout.Button("BindTAThirdPlatform", GUILayout.Height(Height)))

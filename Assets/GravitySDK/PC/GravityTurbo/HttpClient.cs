@@ -101,6 +101,20 @@ namespace GravitySDK.PC.GravityTurbo
         }
 
         /// <summary>
+        /// 向服务器提交post请求
+        /// </summary>
+        /// <param name="serverURL">服务器请求目标地址</param>
+        /// <param name="requestBody">请求的结构体</param>
+        /// <param name="actionResult">处理返回结果的委托,处理请求对象</param>
+        /// <param name="callback"></param>
+        /// <returns></returns>
+        public void SimplePost(string serverURL, Dictionary<string, object> requestBody, Action<UnityWebRequest> actionResult,
+            Callback callback = null)
+        {
+            StartCoroutine(_SimplePost(serverURL, requestBody, actionResult, callback));
+        }
+
+        /// <summary>
         /// GET请求
         /// </summary>
         /// <param name="url">请求地址,like 'http://www.shijing720.com/ '</param>
@@ -134,15 +148,49 @@ namespace GravitySDK.PC.GravityTurbo
         IEnumerator _Post(string serverURL, Dictionary<string, object> requestBody,
             Action<UnityWebRequest> actionResult, Callback callback)
         {
-            var uwr = new UnityWebRequest(serverURL, "POST");
-
             byte[] oldData = System.Text.Encoding.Default.GetBytes(GE_MiniJson.Serialize(requestBody));
             byte[] zipData = UnityWebRequestMgr.GzipData(oldData);
+            bool hasZip = false;
+            if(zipData != null && zipData.Length > 0)
+            {
+                hasZip = true;
+            }
+            if(!hasZip)
+            {
+                serverURL = AppendGzipStatus(serverURL);
+            }
 
-            uwr.uploadHandler = (UploadHandler)new UploadHandlerRaw(zipData);
+            var uwr = new UnityWebRequest(serverURL, "POST");
+
             uwr.downloadHandler = (DownloadHandler)new DownloadHandlerBuffer();
 
-            uwr.SetRequestHeader("Gravity-Content-Compress", "gzip");
+            if (hasZip)
+            {
+                uwr.uploadHandler = (UploadHandler)new UploadHandlerRaw(zipData);
+                uwr.SetRequestHeader("Gravity-Content-Compress", "gzip");
+            }
+            else
+            {
+                uwr.uploadHandler = (UploadHandler)new UploadHandlerRaw(oldData);
+            }
+            uwr.SetRequestHeader("Content-Type", "application/json");
+
+            uwr.SetRequestHeader("GE_LIB", GravitySDKAppInfo.LibName());
+            uwr.SetRequestHeader("GE_LIB_VERSION", GravitySDKAppInfo.LibVersion());
+            uwr.SetRequestHeader("GE_TOKEN", GravityHelper.GetAccessToken());
+
+            yield return uwr.SendWebRequest();
+            actionResult?.Invoke(uwr);
+            callback?.Invoke();
+        }
+
+
+        IEnumerator _SimplePost(string serverURL, Dictionary<string, object> requestBody, Action<UnityWebRequest> actionResult, Callback callback)
+        {
+            byte[] oldData = System.Text.Encoding.Default.GetBytes(GE_MiniJson.Serialize(requestBody));
+            var uwr = new UnityWebRequest(serverURL, "POST");
+            uwr.downloadHandler = (DownloadHandler)new DownloadHandlerBuffer();
+            uwr.uploadHandler = (UploadHandler)new UploadHandlerRaw(oldData);
             uwr.SetRequestHeader("Content-Type", "application/json");
             yield return uwr.SendWebRequest();
             actionResult?.Invoke(uwr);
@@ -152,18 +200,37 @@ namespace GravitySDK.PC.GravityTurbo
 
         public static byte[] GzipData(byte[] data)
         {
-            if (data == null || data.Length == 0)
+            try
             {
-                return data; // 如果数据为空，则不进行压缩
-            }
-            using (MemoryStream compressedStream = new MemoryStream())
-            {
-                using (GZipStream gzipStream = new GZipStream(compressedStream, CompressionLevel.Optimal))
+                if (data == null || data.Length == 0)
                 {
-                    gzipStream.Write(data, 0, data.Length);
+                    return data; // 如果数据为空，则不进行压缩
                 }
-                return compressedStream.ToArray();
+                using (MemoryStream compressedStream = new MemoryStream())
+                {
+                    using (GZipStream gzipStream = new GZipStream(compressedStream, CompressionLevel.Optimal))
+                    {
+                        gzipStream.Write(data, 0, data.Length);
+                    }
+                    return compressedStream.ToArray();
+                }
             }
+            catch (Exception e)
+            {
+                GravitySDKLogger.Print("[GravitySDK] GzipData failed, fallback to raw data. Error: " + e.Message);
+            }
+            return null;
         }
+
+        public static string AppendGzipStatus(string serverURL)
+        {
+            if (serverURL.Contains("gzip_status"))
+            {
+                return serverURL;
+            }
+            string separator = serverURL.Contains("?") ? (serverURL.EndsWith("?") ? "" : "&") : "?";
+            return serverURL  + separator + "gzip_status=1"; ;
+        }
+
     }
 }

@@ -6,37 +6,17 @@ using GravityEngine.Utils;
 using GravitySDK.PC.Storage;
 using GravitySDK.PC.TaskManager;
 using GravitySDK.PC.Utils;
-#if GRAVITY_OPPO_GAME_MODE
-using QGMiniGame;
-#endif
+using GravityEngine.Platform;
+
 using UnityEngine;
 using UnityEngine.Networking;
-#if GRAVITY_WECHAT_GAME_MODE || GRAVITY_BILIBILI_GAME_MODE || GRAVITY_MEITUAN_GAME_MODE
-using WeChatWASM;
-#elif GRAVITY_BYTEDANCE_GAME_MODE
-using StarkSDKSpace;
-#elif GRAVITY_BYTEDANCE_TT_GAME_MODE
-using TTSDK;
-#elif GRAVITY_KUAISHOU_GAME_MODE
-using com.kwai.mini.game;
-using com.kwai.mini.game.config;
-#elif GRAVITY_KUAISHOU_WEBGL_GAME_MODE
-using KSWASM;
-#elif GRAVITY_OPPO_GAME_MODE
-using QGMiniGame;
-#elif GRAVITY_HUAWEI_GAME_MODE
-using HWWASM;
-#elif GRAVITY_ALIPAY_GAME_MODE
-using AlipaySdk;
-#elif GRAVITY_XIAOMI_GAME_MODE
-using mi;
-#endif
+
 
 namespace GravitySDK.PC.GravityTurbo
 {
     public static class GravityHelper
     {
-        private const string GravityHost = "https://api.gravity-engine.com";
+        public static string GravityHost = "https://api.gravity-engine.com";
         private const string dev_host = "https://event-test-backend.gravity-engine.com";
         private static string _accessToken;
         private static string _clientID;
@@ -74,19 +54,21 @@ namespace GravitySDK.PC.GravityTurbo
             GravitySDKLogger.Print("GravityHelper init success");
         }
         
-        static Dictionary<string, string> ConvertToDictionary(Dictionary<string, object> sourceDict)
-        {
-            var targetDict = new Dictionary<string, string>();
-            
-            if (sourceDict == null) return targetDict;
-            foreach (var kvp in sourceDict)
-            {
-                // 尝试将值转换为字符串
-                string stringValue = kvp.Value?.ToString();
-                targetDict[kvp.Key] = stringValue;
-            }
 
-            return targetDict;
+        public static void UpdateUserInfo(Dictionary<string, object> properties)
+        {
+            var code_client_id = Uri.EscapeDataString(SetOrGetClientId(""));
+            var body = GE_MiniJson.Serialize(properties);
+            Debug.Log("UpdateUserInfo request body is " + body);
+            UnityWebRequestMgr.Instance.Post(
+                    GravityHost + "/event_center/api/v1/user/update/?access_token=" + _accessToken + "&client_id=" + code_client_id, properties,
+                (request =>
+                {
+                    string responseText = request.downloadHandler.text;
+                    Dictionary<string, object> res = GE_MiniJson.Deserialize(responseText);
+                    Debug.Log("UpdateUserInfo response is " + responseText);
+                }));
+
         }
 
         public static void PreInit()
@@ -106,121 +88,25 @@ namespace GravitySDK.PC.GravityTurbo
                         return;
                     }    
                 }
-#if GRAVITY_WECHAT_GAME_MODE || GRAVITY_BILIBILI_GAME_MODE || GRAVITY_MEITUAN_GAME_MODE
-                LaunchOptionsGame launchOptionsSync = WX.GetLaunchOptionsSync();
-                var launchQuery = launchOptionsSync.query;
-                var launchScene = launchOptionsSync.scene;
-    #elif GRAVITY_BYTEDANCE_GAME_MODE
-                LaunchOption launchOptionsSync = StarkSDK.API.GetLaunchOptionsSync();
-                var launchQuery = new Dictionary<string, string>();
+                Dictionary<string, string> launchQuery = new Dictionary<string, string>();
                 var launchScene = "";
-                if (launchOptionsSync != null)
+
+                if (GEPlatformManager.isMiniGame())
                 {
-                    launchQuery = launchOptionsSync.Query;
-                    launchScene = launchOptionsSync.Scene;
+                    GEPlatformManager.GetLaunchOptionsSync((pQuery, pScene) =>
+                    {
+                        launchQuery = pQuery;
+                        launchScene = pScene;
+                    });
                 }
-    #elif GRAVITY_BYTEDANCE_TT_GAME_MODE
-                LaunchOption launchOptionsSync = TT.GetLaunchOptionsSync();
-                var launchQuery = new Dictionary<string, string>();
-                var launchScene = "";
-                if (launchOptionsSync != null)
+                else
                 {
-                    launchQuery = launchOptionsSync.Query;
-                    launchScene = launchOptionsSync.Scene;   
-                }
-    #elif GRAVITY_KUAISHOU_GAME_MODE
-#if KUAISHOU_BELOW_121_VERSION
-            KSOutLaunchOption launchOption = KSConfig.kSOutLaunchOption;
-#else 
-            KSOutLaunchOption launchOption = KS.GetLaunchOptionSync();
+#if GRAVITY_INNER_DEBUG
+                    launchQuery["a"] = "b";
+                    launchScene = "1000";
 #endif
-                var launchQuery = launchOption.query;
-                var launchScene = launchOption.from;
-    #elif GRAVITY_KUAISHOU_WEBGL_GAME_MODE
-                LaunchOptions launchOption = KS.GetLaunchOptionSync();
-                var launchQuery = launchOption.query;
-                var launchScene = launchOption.from;
-    #elif GRAVITY_ALIPAY_GAME_MODE
-                Dictionary<string, string> launchQuery = new Dictionary<string, string>();
-                var launchScene = "";
-                
-                AlipaySDK.API.GetLaunchOptions((result) =>
-                {
-                    // TEST  {"query":{"key1":"value1","key2":"value2"},"referrerInfo":{}}
-                    // result = "{\"query\":{\"key1\":\"value1\",\"key2\":\"value2\"},\"referrerInfo\":{}}";
-                    Debug.Log("alipay launch info is " + result);
-                    if (result!=null)
-                    {
-                        Dictionary<string, object> launchOptionDict = GE_MiniJson.Deserialize(result);
-                        if (launchOptionDict.TryGetValue("query", out var queryStr))
-                        {
-                            Dictionary<string, object> queryDict = (Dictionary<string, object>) queryStr;
-                            launchQuery = ConvertToDictionary(queryDict);
-                            Debug.Log("alipay query got");
-                            // finally
-                            var launchQueryStr = GE_MiniJson.Serialize(launchQuery);
-                            GravitySDKFile.SaveData("query_cache", "" + launchQueryStr);
-                            GravitySDKFile.SaveData("scene_cache", "" + launchScene);
-                            GravitySDKFile.SaveData("latest_cache_timestamp", "" + currentTimestamp);
-                        }
-                        else
-                        {
-                            Debug.Log("alipay query is null");
-                        }
-                    }
-                    else
-                    {
-                        Debug.Log("alipay launch option is null");
-                    }
-                    // 异步的需要return，针对支付宝小游戏，暂时没有改造
-                    return;
-                });
-    #elif GRAVITY_OPPO_GAME_MODE
-                Dictionary<string, string> launchQuery = new Dictionary<string, string>();
-                var launchScene = "";
-                var launchStr =  QG.GetEnterOptionsSync();
-                Debug.Log("oppo quickgame launch info is " + launchStr);
-                if (launchStr!=null)
-                {
-                    Dictionary<string, object> launchOptionDict = GE_MiniJson.Deserialize(launchStr);
-                    if (launchOptionDict.TryGetValue("query", out var queryStr))
-                    {
-                        Dictionary<string, object> queryDict = (Dictionary<string, object>) queryStr;
-                        launchQuery = ConvertToDictionary(queryDict);
-                        Debug.Log("oppo quickgame query got");
-                    }
-                    else
-                    {
-                        Debug.Log("oppo quickgame query is null");
-                    }
                 }
-    #elif GRAVITY_HUAWEI_GAME_MODE
-                Dictionary<string, string> launchQuery = new Dictionary<string, string>();
-                var launchScene = "";
-                GetLaunchOptionsSyncResult result = QG.GetLaunchOptionsSync();
-                Debug.Log("huawei quickgame launch info is " + result);
-                if (result!=null)
-                {
-                    Dictionary<string, object> queryDict = GE_MiniJson.Deserialize(result.query);
-                    launchQuery = ConvertToDictionary(queryDict);
-                    Debug.Log("huawei quickgame query got");
-                }
-#elif GRAVITY_XIAOMI_GAME_MODE
-                Dictionary<string, string> launchQuery = new Dictionary<string, string>();
-                QGLaunchInfo launchInfo = MiGetOptions.Instance.GetLaunchOptionsSync();
-                var launchScene = "" + launchInfo.scene;
-                if (launchInfo.query.type != null)
-                {
-                    launchQuery["type"] = launchInfo.query.type;
-                }
-#elif GRAVITY_INNER_DEBUG
-                Dictionary<string, string> launchQuery = new Dictionary<string, string>();
-                launchQuery["a"] = "b";
-                var launchScene = "1000"; 
-    #else
-                Dictionary<string, string> launchQuery = new Dictionary<string, string>();
-                var launchScene = "";
-    #endif
+
                 // finally
                 var launchQueryStr = GE_MiniJson.Serialize(launchQuery);
                 GravitySDKFile.SaveData("query_cache", "" + launchQueryStr);
@@ -270,7 +156,7 @@ namespace GravitySDK.PC.GravityTurbo
                     if (cacheQueryStr != null)
                     {
                         cacheQuery = GE_MiniJson.Deserialize(cacheQueryStr);
-                        wxLaunchQuery = ConvertToDictionary(cacheQuery);
+                        wxLaunchQuery = GravityEngineAPI.ConvertToDictionary(cacheQuery);
                         wxLaunchQuery["gravity_launch_cache"] = "1";
                     }
                 }
@@ -298,6 +184,45 @@ namespace GravitySDK.PC.GravityTurbo
             }
             Debug.Log(launchScene);
         }
+
+        public static Dictionary<string, string> ReSetAdParams(Dictionary<string, string> wxLaunchQuery)
+        {
+            wxLaunchQuery.TryGetValue("ad_params", out string ad_params);
+            if (!string.IsNullOrEmpty(ad_params))
+            {
+                try
+                {
+                    string ad_params_value = Uri.UnescapeDataString(ad_params);
+                    Dictionary<string, object> ad_params_obj = GE_MiniJson.Deserialize(ad_params_value);
+                    Dictionary<string, object> modified_ad_params_obj = new Dictionary<string, object>();
+                    if (ad_params_obj.TryGetValue("log_extra", out var log_extra_obj_temp))
+                    {
+                        string log_extra_obj_str = GE_MiniJson.Serialize(log_extra_obj_temp);
+                        Dictionary<string, object> log_extra_obj = GE_MiniJson.Deserialize(log_extra_obj_str);
+                        Dictionary<string, object> modified_log_extra_obj = new Dictionary<string, object>();
+                        if (log_extra_obj.TryGetValue("req_id", out var req_id))
+                        {
+                            modified_log_extra_obj.Add("req_id", req_id);
+                        }
+                        if (log_extra_obj.TryGetValue("advertiser_id", out var advertiser_id))
+                        {
+                            modified_log_extra_obj.Add("advertiser_id", advertiser_id);
+                        }
+                        modified_ad_params_obj.Add("log_extra", modified_log_extra_obj);
+                    }
+                    string modified_ad_params_value = GE_MiniJson.Serialize(modified_ad_params_obj);
+                    string modified_ad_params = Uri.EscapeDataString(modified_ad_params_value);
+                    wxLaunchQuery.Remove("ad_params");
+                    wxLaunchQuery.Add("ad_params", modified_ad_params);
+                }
+                catch (Exception e)
+                {
+                }
+            }
+            return wxLaunchQuery;
+        }
+
+
 
         public static void Initialize(string clientId, string name, int version, string openId, Dictionary<string, string> wxLaunchQuery, bool enableSyncAttribution,
             IInitializeCallback initializeCallback, UnityWebRequestMgr.Callback callback)
@@ -331,7 +256,7 @@ namespace GravitySDK.PC.GravityTurbo
                         if (cacheQueryStr != null)
                         {
                             cacheQuery = GE_MiniJson.Deserialize(cacheQueryStr);
-                            wxLaunchQuery = ConvertToDictionary(cacheQuery);
+                            wxLaunchQuery = GravityEngineAPI.ConvertToDictionary(cacheQuery);
                             wxLaunchQuery["gravity_launch_cache"] = "1";
                         }
                     }
@@ -342,13 +267,13 @@ namespace GravitySDK.PC.GravityTurbo
                 Debug.Log("get cache query warning");
                 Debug.Log(e);
             }
-
-#if GRAVITY_ALIPAY_GAME_MODE
-            if (wxLaunchQuery != null && wxLaunchQuery.TryGetValue("channel", out string queryChannel))
+            if (GEPlatformManager.IsAliPayMiniGame())
             {
-                _channel = queryChannel;
+                if (wxLaunchQuery != null && wxLaunchQuery.TryGetValue("channel", out string queryChannel))
+                {
+                    _channel = queryChannel;
+                }
             }
-#endif
 
             var currentClientId = SetOrGetClientId(clientId);
             var registerRequestDir = new Dictionary<string, object>()
@@ -359,135 +284,33 @@ namespace GravitySDK.PC.GravityTurbo
                 {"version", version},
                 {"wx_openid", openId},
                 {"wx_unionid", ""},
-                {"ad_data", wxLaunchQuery},
+                {"ad_data", ReSetAdParams(wxLaunchQuery)},
                 {"need_return_attribution", enableSyncAttribution},
             };
-#if GRAVITY_OPPO_GAME_MODE
-            string deviceId = "";
-            QG.GetDeviceId(
-                (success) =>
-                {
-                    deviceId = success.data.deviceId; //设备唯一标识
-                },
-                (fail) =>
-                {
-                    Debug.Log("QG.GetDeviceId fail = " + JsonUtility.ToJson(fail));
-                },
-                (complete) =>
-                {
-                    Debug.Log("gravity-engine current deviceId is " + deviceId);
-                    QG.GetSystemInfo((msg) =>
-                        {
-                            string brand = msg.data.brand; // 手机品牌
-                            string language = msg.data.language; // 系统语言
-                            string model = msg.data.model; // 手机型号
-                            string platformVersionName = msg.data.platformVersionName; // 客户端平台
-                            string platformVersionCode = msg.data.platformVersionCode; // Version
-                            string screenHeight = msg.data.screenHeight; // 屏幕高度
-                            string screenWidth = msg.data.screenWidth; // 屏幕宽度
-                            string system = msg.data.system; // 系统版本
-                            string COREVersion = msg.data.COREVersion; // 版本号
-                            
-                            var deviceInfo = new Dictionary<string, string>()
-                            {
-                                {"os_name", "android"},
-                                {"android_id", deviceId},
-                                {"imei", deviceId},
-                                {"oaid", deviceId},
-                                {"rom", platformVersionName},
-                                {"rom_version", platformVersionCode},
-                                {"brand", brand},
-                                {"model", model},
-                                {"android_version", COREVersion}
-                            };
-                            registerRequestDir["device_info"] = deviceInfo;
-                            RequestInitialize(initializeCallback, callback, currentClientId, registerRequestDir);
-                        },
-                        (err) =>
-                        {
-                            Debug.Log("QG.GetSystemInfo fail = " + JsonUtility.ToJson(err));
-                            var deviceInfo = new Dictionary<string, string>()
-                            {
-                                {"os_name", "android"},
-                                {"android_id", deviceId},
-                                {"imei", deviceId},
-                                {"oaid", deviceId},
-                            };
-                            registerRequestDir["device_info"] = deviceInfo;
-                            RequestInitialize(initializeCallback, callback, currentClientId, registerRequestDir);
-                        });
-                });
-#elif GRAVITY_HUAWEI_GAME_MODE
-            string deviceId = "";
-            QG.GetOAID(new GetOAIDOption()
+
+            if (GEPlatformManager.NeedGetDeviceInfoBeforeInit())
             {
-                success = res =>
+                GEPlatformManager.getDeviceInfo((deviceInfo) =>
                 {
-                    // 成功获取oaid
-                    deviceId = res.oaid; //设备唯一标识
-                },
-                fail = () =>
-                {
-                    Debug.Log("QG.GetOAID failed");
-                },
-                complete = () =>
-                {
-                    QG.GetSystemInfo(new GetSystemInfoOption()
-                    {
-                        success = msg =>
-                        {
-                            string brand = msg.brand; // 手机品牌
-                            string model = msg.model; // 手机型号
-                            string platformVersionName = msg.platformVersionName; // 客户端平台
-                            string platformVersionCode = Convert.ToString(msg.platformVersionCode); // Version
-                            string COREVersion = msg.COREVersion; // 版本号
-                            
-                            var deviceInfo = new Dictionary<string, string>()
-                            {
-                                {"os_name", "android"},
-                                {"android_id", deviceId},
-                                {"imei", deviceId},
-                                {"oaid", deviceId},
-                                {"rom", platformVersionName},
-                                {"rom_version", platformVersionCode},
-                                {"brand", brand},
-                                {"model", model},
-                                {"android_version", COREVersion}
-                            };
-                            registerRequestDir["device_info"] = deviceInfo;
-                            RequestInitialize(initializeCallback, callback, currentClientId, registerRequestDir);
-                        },
-                        fail = () =>
-                        {
-                            Debug.Log("QG.GetSystemInfo fail");
-                            var deviceInfo = new Dictionary<string, string>()
-                            {
-                                {"os_name", "android"},
-                                {"android_id", deviceId},
-                                {"imei", deviceId},
-                                {"oaid", deviceId},
-                            };
-                            registerRequestDir["device_info"] = deviceInfo;
-                            RequestInitialize(initializeCallback, callback, currentClientId, registerRequestDir);
-                        },
-                        complete = () =>
-                        {
-                            
-                        }
-                    });
-                }
-            });
-#else
-            RequestInitialize(initializeCallback, callback, currentClientId, registerRequestDir);
-#endif
+                    registerRequestDir["device_info"] = deviceInfo;
+                    RequestInitialize(initializeCallback, callback, currentClientId, registerRequestDir);
+                });
+            }
+            else
+            {
+                RequestInitialize(initializeCallback, callback, currentClientId, registerRequestDir);
+            }
+
         }
 
         private static void RequestInitialize(IInitializeCallback initializeCallback, UnityWebRequestMgr.Callback callback, string currentClientId,
             Dictionary<string, object> registerRequestDir)
         {
             var body = GE_MiniJson.Serialize(registerRequestDir);
+            var code_client_id = Uri.EscapeDataString(currentClientId);
+
             var url = GravityHost + "/event_center/api/v1/user/initialize/?access_token=" + _accessToken +
-                      "&client_id=" + currentClientId;
+                      "&client_id=" + code_client_id;
             Debug.Log("url is " + url);
             Debug.Log("body is " + body);
             UnityWebRequestMgr.Instance.Post(url, registerRequestDir, (request =>
@@ -502,6 +325,14 @@ namespace GravitySDK.PC.GravityTurbo
                             int code = Convert.ToInt32(re);
                             if (code == 0)
                             {
+                                //缓存已经成功初始化过
+                                int hasInit = UnityEngine.PlayerPrefs.HasKey("gravity_sdk_has_initialize") ? UnityEngine.PlayerPrefs.GetInt("gravity_sdk_has_initialize") : 0;
+                                UnityEngine.PlayerPrefs.SetInt("gravity_sdk_has_initialize", 1);
+                                if (hasInit == 0)
+                                {
+                                    //首次初始化，尝试微信演练模式
+                                    GEMiniPlatformWechat.TryQueryAppConfigInfo();
+                                }
                                 if (res.TryGetValue("data", out object dataObj))
                                 {
                                     initializeCallback?.onSuccess((Dictionary<string, object>) dataObj);
@@ -513,8 +344,21 @@ namespace GravitySDK.PC.GravityTurbo
                                 return;
                             }
                         }
+                        GravityEngineAPI.TrackSdkError("InitializeFail", res);
                     }
-
+                    else
+                    {
+                        if (string.IsNullOrEmpty(request.downloadHandler.text))
+                        {
+                            responseText = "";
+                        }
+                        Dictionary<string, object> posthogChildProperties = new Dictionary<string, object>()
+                        {
+                            {"error", request.error},
+                            {"responseStr", responseText},
+                        };
+                        GravityEngineAPI.TrackSdkError("InitializeFail", posthogChildProperties);
+                    }
                     initializeCallback?.onFailed("code is not 0, failed with msg " + res?["msg"]);
                 }), callback);
         }
@@ -522,17 +366,7 @@ namespace GravitySDK.PC.GravityTurbo
         
         public static void GetOpenId(string sessionCode, string accessToken, IGetOpenIdCallback getOpenIdCallback)
         {
-#if GRAVITY_WECHAT_GAME_MODE
-            string platformStr = "wx";
-#elif GRAVITY_BYTEDANCE_GAME_MODE || GRAVITY_BYTEDANCE_TT_GAME_MODE
-            string platformStr = "dy";
-#elif GRAVITY_KUAISHOU_GAME_MODE || GRAVITY_KUAISHOU_WEBGL_GAME_MODE
-            string platformStr = "ks";
-#elif GRAVITY_BILIBILI_GAME_MODE
-            string platformStr = "bili";
-#else
-            string platformStr = null;
-#endif
+            string platformStr = GEPlatformManager.platformStr();
             if (getOpenIdCallback == null)
             {
                 GravitySDKLogger.Print("Callback error");
@@ -540,7 +374,7 @@ namespace GravitySDK.PC.GravityTurbo
             }
             if (platformStr == null)
             {
-                getOpenIdCallback.onFailed("平台类型错误，请检查是否正确添加全局宏参数：GRAVITY_WECHAT_GAME_MODE、GRAVITY_BYTEDANCE_GAME_MODE、GRAVITY_BYTEDANCE_TT_GAME_MODE、GRAVITY_KUAISHOU_GAME_MODE、GRAVITY_KUAISHOU_WEBGL_GAME_MODE、GRAVITY_BILIBILI_GAME_MODE");
+                getOpenIdCallback.onFailed("平台类型错误，请检查是否正确添加全局宏参数：https://help.gravity-engine.com/docs/Unity#1.4_添加全局宏参数");
             }
             else
             {
@@ -664,10 +498,11 @@ namespace GravitySDK.PC.GravityTurbo
         /// <param name="waitTime"></param>
         /// <param name="retryCount"></param>
         /// <param name="maxRetryInt"></param>
-        public static void QueryDryRunInfo(string traceId, Dictionary<string, object> otherParams, IQueryDryRunCallback queryDryRunCallback, int waitTime = 1, int retryCount = 0, int maxRetryInt = 0)
+        public static void QueryDryRunInfo(string traceId, Dictionary<string, object> otherParams, IQueryDryRunCallback queryDryRunCallback, int waitTime = 1, int retryCount = 0, int maxRetryInt = 3)
         {
+            var code_client_id = Uri.EscapeDataString(SetOrGetClientId(""));
             UnityWebRequestMgr.Instance.Get(
-                    GravityHost + "/event_center/api/v1/event/postback_info/?access_token=" + _accessToken + "&client_id=" + SetOrGetClientId("") + "&trace_id=" + traceId,
+                    GravityHost + "/event_center/api/v1/event/sdk_postback/?access_token=" + _accessToken + "&client_id=" + code_client_id + "&trace_id=" + traceId,
                 (request =>
                 {
                     string responseText = request.downloadHandler.text;
@@ -685,18 +520,48 @@ namespace GravitySDK.PC.GravityTurbo
                                 if (res.TryGetValue("data", out object dataObj))
                                 {
                                     Dictionary<string, object> dataDict = (Dictionary<string, object>) dataObj;
-                                    // foreach (var kvp in dataDict)
-                                    // {
-                                    //     Debug.Log("key " + kvp.Key + " : " + kvp.Value?.ToString());
-                                    // }
-                                    if (maxRetryInt == 0)
+                                    if (dataDict.TryGetValue("reason", out object reasonStr))
                                     {
-                                        if (dataDict.TryGetValue("retry", out var maxRetry))
+                                        if (reasonStr.Equals("not_enable_dryrun_mode"))
                                         {
-                                            maxRetryInt = Convert.ToInt32(maxRetry);
+                                            queryDryRunCallback?.onEmpty(GravityEngineAPI.DryRunEventEmpty.NOT_ENABLE);
+                                            return;
+                                        }
+                                        else if (reasonStr.Equals("not_in_window"))
+                                        {
+                                            queryDryRunCallback?.onEmpty(GravityEngineAPI.DryRunEventEmpty.NO_IN_POSTBACK_WINDOW);
+                                            return;
+                                        }
+                                        else if (reasonStr.Equals("event_has_handled"))
+                                        {
+                                            queryDryRunCallback?.onEmpty(GravityEngineAPI.DryRunEventEmpty.SKIP);
+                                            return;
+                                        }
+                                        else if (reasonStr.Equals("event_not_found") || reasonStr.Equals("no_ready"))
+                                        {
+                                            if (maxRetryInt > retryCount)
+                                            {
+                                                if (retryCount == 0)
+                                                {
+                                                    //第一次请求，
+                                                    if (dataDict.TryGetValue("retry", out var maxRetry))
+                                                    {
+                                                        maxRetryInt = Convert.ToInt32(maxRetry);
+                                                    }
+                                                }
+                                                Debug.Log("retry " + retryCount + " maxCount " + maxRetryInt + " wait time " + waitTime);
+                                                QueryDryRunInfo(traceId, otherParams, queryDryRunCallback, waitTime + 1, retryCount + 1, maxRetryInt);
+                                                return;
+                                            }
+                                            else
+                                            {
+                                                queryDryRunCallback?.onEmpty(GravityEngineAPI.DryRunEventEmpty.SKIP);
+                                            }
+                                            return;
                                         }
                                     }
-                                    if (dataDict.TryGetValue("postback_list", out object respObj))
+
+                                    if (dataDict.TryGetValue("postback_list", out object respObj) && dataDict.TryGetValue("click_company", out object clickCompany))
                                     {
                                         Debug.Log(respObj);
                                         List<object> respList = (List<object>) Convert.ChangeType(respObj, typeof(List<object>));
@@ -705,13 +570,14 @@ namespace GravitySDK.PC.GravityTurbo
                                             // 没有查到数据，可能需要retry
                                             if (maxRetryInt > retryCount)
                                             {
+                                                //正常来说不会走到这，postback_list为空时，reson一定有特殊值
                                                 Debug.Log("retry " + retryCount + " maxCount " + maxRetryInt + " wait time " + waitTime);
                                                 QueryDryRunInfo(traceId, otherParams, queryDryRunCallback, waitTime + 1, retryCount + 1, maxRetryInt);
                                                 return;
                                             }
                                             else
                                             {
-                                                queryDryRunCallback?.onEmpty();
+                                                queryDryRunCallback?.onEmpty(GravityEngineAPI.DryRunEventEmpty.SKIP);
                                             }
                                         }
                                         
@@ -724,7 +590,6 @@ namespace GravitySDK.PC.GravityTurbo
                                             //     Debug.Log("key " + eachValue.Key + " : " + eachValue.Value?.ToString() + " " + eachValue);
                                             // }
                                             string action = (string) postbackDict["action"];
-                                            string clickCompany = (string) postbackDict["click_company"];
                                             var postback = new Dictionary<string, string>()
                                             {
                                                 {"trace_id", traceId},
@@ -736,13 +601,13 @@ namespace GravitySDK.PC.GravityTurbo
 
                                                 Debug.Log("pay " + postbackValueInt);
                                                 // 回调出去，给媒体上报
-                                                queryDryRunCallback?.onTrackPay(postbackValueInt, clickCompany, otherParams);
+                                                queryDryRunCallback?.onTrackPay(postbackValueInt, (string)clickCompany, otherParams);
                                                 postBackList.Add(postback);
                                             } else if (action.Equals("key_active"))
                                             {
                                                 Debug.Log("key_active");
                                                 // 回调出去，给媒体上报
-                                                queryDryRunCallback?.onTrackKeyActive(clickCompany, otherParams);
+                                                queryDryRunCallback?.onTrackKeyActive((string)clickCompany, otherParams);
                                                 postBackList.Add(postback);
                                             }
                                         }
@@ -755,12 +620,12 @@ namespace GravitySDK.PC.GravityTurbo
                                     }
                                     else
                                     {
-                                        queryDryRunCallback?.onEmpty();
+                                        queryDryRunCallback?.onEmpty(GravityEngineAPI.DryRunEventEmpty.SKIP);
                                     }
                                 }
                                 else
                                 {
-                                    queryDryRunCallback?.onEmpty();
+                                    queryDryRunCallback?.onEmpty(GravityEngineAPI.DryRunEventEmpty.SKIP);
                                 }
                                 return;
                             }
@@ -786,7 +651,8 @@ namespace GravitySDK.PC.GravityTurbo
             {
                 silentPeriod = 7;// 不传则后端默认使用7天
             }
-            string url = GravityHost + "/event_center/api/v1/event/tencent_sdk/?access_token=" + _accessToken + "&client_id=" + SetOrGetClientId("") + "&backFlowDay=" + silentPeriod + "&registerDelayDay=-1" + "&trace_id=" + traceId + "&action=pay";
+            var code_client_id = Uri.EscapeDataString(SetOrGetClientId(""));
+            string url = GravityHost + "/event_center/api/v1/event/tencent_sdk/?access_token=" + _accessToken + "&client_id=" + code_client_id + "&backFlowDay=" + silentPeriod + "&registerDelayDay=-1" + "&trace_id=" + traceId + "&action=pay";
             //Debug.Log("request url is " + url);
             UnityWebRequestMgr.Instance.Get(url, (request =>
             {
@@ -866,10 +732,11 @@ namespace GravitySDK.PC.GravityTurbo
             {
                 {"postback_list", postBackList},
             };
+            var code_client_id = Uri.EscapeDataString(SetOrGetClientId(""));
             var body = GE_MiniJson.Serialize(requestDir);
             //Debug.Log("SetupPayEventToGravityEngine request body is " + body);
             UnityWebRequestMgr.Instance.Post(
-                    GravityHost + "/event_center/api/v1/event/tencent_sdk/?access_token=" + _accessToken + "&client_id=" + SetOrGetClientId(""), requestDir,
+                    GravityHost + "/event_center/api/v1/event/tencent_sdk/?access_token=" + _accessToken + "&client_id=" + code_client_id, requestDir,
                 (request =>
                 {
                     string responseText = request.downloadHandler.text;
@@ -897,10 +764,11 @@ namespace GravitySDK.PC.GravityTurbo
             {
                 {"postback_list", postBackList},
             };
+            var code_client_id = Uri.EscapeDataString(SetOrGetClientId(""));
             var body = GE_MiniJson.Serialize(requestDir);
             Debug.Log("request body is " + body);
             UnityWebRequestMgr.Instance.Post(
-                    GravityHost + "/event_center/api/v1/event/postback_info/?access_token=" + _accessToken + "&client_id=" + SetOrGetClientId(""), requestDir,
+                    GravityHost + "/event_center/api/v1/event/sdk_postback/?access_token=" + _accessToken + "&client_id=" + code_client_id, requestDir,
                 (request =>
                 {
                     string responseText = request.downloadHandler.text;
@@ -940,8 +808,9 @@ namespace GravitySDK.PC.GravityTurbo
             };
             var body = GE_MiniJson.Serialize(requestDir);
             Debug.Log("request body is " + body);
+            var code_client_id = Uri.EscapeDataString(SetOrGetClientId(""));
             UnityWebRequestMgr.Instance.Post(
-                    GravityHost + "/event_center/api/v1/event/tencent_sdk/?access_token=" + _accessToken + "&client_id=" + SetOrGetClientId(""), requestDir,
+                    GravityHost + "/event_center/api/v1/event/tencent_sdk/?access_token=" + _accessToken + "&client_id=" + code_client_id, requestDir,
                 (request =>
                 {
                     string responseText = request.downloadHandler.text;
@@ -972,8 +841,9 @@ namespace GravitySDK.PC.GravityTurbo
             }
             // lock
             GravitySDKFile.SaveData("tencent_sdk_lock", 1);
+            var code_client_id = Uri.EscapeDataString(SetOrGetClientId(""));
             UnityWebRequestMgr.Instance.Get(
-                    GravityHost + "/event_center/api/v1/event/tencent_sdk/?access_token=" + _accessToken + "&client_id=" + SetOrGetClientId("") + "&backFlowDay=" + _silentPeriod,
+                    GravityHost + "/event_center/api/v1/event/tencent_sdk/?access_token=" + _accessToken + "&client_id=" + code_client_id + "&backFlowDay=" + _silentPeriod,
                 (request =>
                 {
                     string responseText = request.downloadHandler.text;
@@ -998,22 +868,20 @@ namespace GravitySDK.PC.GravityTurbo
                                     if (dataDict.TryGetValue("action", out object action))
                                     {
                                         Debug.Log(action);
-#if GRAVITY_WECHAT_GAME_MODE && ENABLE_TENCENT_SDK_TRACK
+
                                         // 判断action，并且执行回调
                                         if (action.Equals("register"))
                                         {
                                             // 首次注册
-                                            DnSdkHelper.onRegister();
-                                            Debug.Log("tencent sdk onRegister");
+                                            GEPlatformManager.onRegister();
                                             SetupUserInfo("register");
-                                        } else if (action.Equals("re_active") && _enableSilentPeriod)
+                                        }
+                                        else if (action.Equals("re_active") && _enableSilentPeriod)
                                         {
                                             // 沉默唤醒
-                                            DnSdkHelper.onReActive(_silentPeriod);
-                                            Debug.Log("tencent sdk onReActive " + _silentPeriod);
+                                            GEPlatformManager.onReActive(_silentPeriod);
                                             SetupUserInfo("re_active");
                                         }
-#endif
                                     }
                                     else
                                     {
@@ -1129,8 +997,9 @@ namespace GravitySDK.PC.GravityTurbo
         
         public static void TryDryRunMode(int waitTime = 1, int retryCount = 0, int maxRetryInt = 0, string specificAction = null)
         {
+            var code_client_id = Uri.EscapeDataString(SetOrGetClientId(""));
             UnityWebRequestMgr.Instance.Get(
-                GravityHost + "/event_center/api/v1/event/postback_info/?access_token=" + _accessToken + "&client_id=" + SetOrGetClientId(""),
+                GravityHost + "/event_center/api/v1/event/postback_info/?access_token=" + _accessToken + "&client_id=" + code_client_id,
                 (request =>
                 {
                     string responseText = request.downloadHandler.text;
@@ -1201,11 +1070,8 @@ namespace GravitySDK.PC.GravityTurbo
                                                 int postbackValueInt = Convert.ToInt32(postbackDict["postback_value"]);
 
                                                 Debug.Log("pay " + postbackValueInt);
-#if GRAVITY_WECHAT_GAME_MODE && ENABLE_TENCENT_SDK_TRACK
-                                                // 付费
-                                                DnSdkHelper.onPurchase(postbackValueInt);
-                                                Debug.Log("tencent sdk onPurchase " + postbackValueInt);
-#endif
+                                                GEPlatformManager.onPurchase(postbackValueInt);
+
                                             } else if (action.Equals("create_role"))
                                             {
                                                 string role_name = "";
@@ -1222,11 +1088,8 @@ namespace GravitySDK.PC.GravityTurbo
                                             } else if (action.Equals("register"))
                                             {
                                                 Debug.Log("register");
-#if GRAVITY_WECHAT_GAME_MODE && ENABLE_TENCENT_SDK_TRACK
-                                                // 首次注册
-                                                DnSdkHelper.onRegister();
-                                                Debug.Log("tencent sdk onRegister");
-#endif
+                                                GEPlatformManager.onRegister();
+
                                             } else if (action.Equals("re_active"))
                                             {
                                                 int re_active_day = 0;
@@ -1235,11 +1098,7 @@ namespace GravitySDK.PC.GravityTurbo
                                                     re_active_day = Convert.ToInt32(postbackDict["re_active_day"]);
                                                 }
                                                 Debug.Log("re_active " + re_active_day);
-#if GRAVITY_WECHAT_GAME_MODE && ENABLE_TENCENT_SDK_TRACK
-                                                // 沉默唤醒
-                                                DnSdkHelper.onReActive(re_active_day);
-                                                Debug.Log("tencent sdk onReActive " + re_active_day);
-#endif
+                                                GEPlatformManager.onReActive(re_active_day);
                                             }
                                             var postback = new Dictionary<string, string>()
                                             {

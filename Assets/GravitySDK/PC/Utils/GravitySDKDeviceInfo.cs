@@ -2,10 +2,11 @@
 using GravitySDK.PC.Constant;
 using GravitySDK.PC.Storage;
 using UnityEngine;
+using GravityEngine.Platform;
 
 namespace GravitySDK.PC.Utils
 {
-    public class WechatGameDeviceInfo
+    public class GEMiniGameDeviceInfo
     {
         /// <summary> 
         /// 需要基础库： `1.1.0`
@@ -185,16 +186,20 @@ namespace GravitySDK.PC.Utils
 
     public class GravitySDKDeviceInfo
     {
-        private static WechatGameDeviceInfo _wechatGameDeviceInfo;
+        private static GEMiniGameDeviceInfo _miniGameDeviceInfo;
 
-        public static void SetWechatGameDeviceInfo(WechatGameDeviceInfo wechatGameDeviceInfo)
+        public static void SetMiniGameDeviceInfo(GEMiniGameDeviceInfo miniGameDeviceInfo)
         {
-            _wechatGameDeviceInfo = wechatGameDeviceInfo;
+            _miniGameDeviceInfo = miniGameDeviceInfo;
         }
 
         public static void SetNetworkType(string networkType)
         {
-            _wechatGameDeviceInfo.networkType = networkType;
+            if (_miniGameDeviceInfo == null)
+            {
+                _miniGameDeviceInfo = new GEMiniGameDeviceInfo();
+            }
+            _miniGameDeviceInfo.networkType = networkType;
         }
 
         //设备ID
@@ -204,11 +209,14 @@ namespace GravitySDK.PC.Utils
             {
                 return "";
             }
-#if GRAVITY_WECHAT_GAME_MODE || GRAVITY_BILIBILI_GAME_MODE || GRAVITY_MEITUAN_GAME_MODE || GRAVITY_BYTEDANCE_GAME_MODE || GRAVITY_BYTEDANCE_TT_GAME_MODE || GRAVITY_KUAISHOU_GAME_MODE || GRAVITY_KUAISHOU_WEBGL_GAME_MODE || GRAVITY_OPPO_GAME_MODE || GRAVITY_ALIPAY_GAME_MODE || GRAVITY_HUAWEI_GAME_MODE || GRAVITY_XIAOMI_GAME_MODE
-            return RandomDeviceID();
-#else
+            if (GEPlatformManager.isMiniGame())
+            {
+                return RandomDeviceID();
+            }
+            else
+            {
                 return SystemInfo.deviceUniqueIdentifier;
-#endif
+            }
         }
 
         //随机数持久化,作为设备ID的备选(WebGL获取不到设备ID)
@@ -231,9 +239,10 @@ namespace GravitySDK.PC.Utils
             {
                 return "";
             }
-#if GRAVITY_WECHAT_GAME_MODE || GRAVITY_BILIBILI_GAME_MODE || GRAVITY_MEITUAN_GAME_MODE
-            return  _wechatGameDeviceInfo != null ? _wechatGameDeviceInfo.networkType : "";
-#else
+            if (GEPlatformManager.IsWechatMiniGame())
+            {
+                return _miniGameDeviceInfo != null ? _miniGameDeviceInfo.networkType : "";
+            }
             string networkType = "NULL";
             if (Application.internetReachability == NetworkReachability.ReachableViaCarrierDataNetwork)
             {
@@ -245,7 +254,6 @@ namespace GravitySDK.PC.Utils
             }
 
             return networkType;
-#endif
         }
 
         //os类型
@@ -255,24 +263,24 @@ namespace GravitySDK.PC.Utils
             {
                 return "";
             }
-#if GRAVITY_WECHAT_GAME_MODE || GRAVITY_BILIBILI_GAME_MODE || GRAVITY_MEITUAN_GAME_MODE || GRAVITY_BYTEDANCE_GAME_MODE || GRAVITY_BYTEDANCE_TT_GAME_MODE || GRAVITY_KUAISHOU_WEBGL_GAME_MODE || GRAVITY_ALIPAY_GAME_MODE || GRAVITY_OPPO_GAME_MODE || GRAVITY_HUAWEI_GAME_MODE || GRAVITY_XIAOMI_GAME_MODE
-            return _wechatGameDeviceInfo != null ? _wechatGameDeviceInfo.platform : "";
-#else
-                string os = "other";
-                if (SystemInfo.operatingSystemFamily == OperatingSystemFamily.Linux)
-                {
-                    os = "Linux";
-                }
-                else if (SystemInfo.operatingSystemFamily == OperatingSystemFamily.MacOSX)
-                {
-                    os = "MacOSX";
-                }
-                else if (SystemInfo.operatingSystemFamily == OperatingSystemFamily.Windows)
-                {
-                    os = "Windows";
-                }
-                return os;
-#endif
+            if (GEPlatformManager.IsGePlatform())
+            {
+                return _miniGameDeviceInfo != null ? _miniGameDeviceInfo.platform : "";
+            }
+            string os = "other";
+            if (SystemInfo.operatingSystemFamily == OperatingSystemFamily.Linux)
+            {
+                os = "Linux";
+            }
+            else if (SystemInfo.operatingSystemFamily == OperatingSystemFamily.MacOSX)
+            {
+                os = "MacOSX";
+            }
+            else if (SystemInfo.operatingSystemFamily == OperatingSystemFamily.Windows)
+            {
+                os = "Windows";
+            }
+            return os;
         }
 
         //OS版本信息
@@ -282,11 +290,11 @@ namespace GravitySDK.PC.Utils
             {
                 return "";
             }
-#if GRAVITY_WECHAT_GAME_MODE || GRAVITY_BILIBILI_GAME_MODE || GRAVITY_MEITUAN_GAME_MODE || GRAVITY_BYTEDANCE_GAME_MODE || GRAVITY_BYTEDANCE_TT_GAME_MODE || GRAVITY_ALIPAY_GAME_MODE || GRAVITY_OPPO_GAME_MODE || GRAVITY_HUAWEI_GAME_MODE || GRAVITY_XIAOMI_GAME_MODE
-            return _wechatGameDeviceInfo != null ? _wechatGameDeviceInfo.system : "";
-#else
+            if (GEPlatformManager.IsGePlatform())
+            {
+                return _miniGameDeviceInfo != null ? _miniGameDeviceInfo.system : "";
+            }
             return SystemInfo.operatingSystem;
-#endif
         }
 
         //屏幕宽度
@@ -296,11 +304,11 @@ namespace GravitySDK.PC.Utils
             {
                 return 0;
             }
-#if GRAVITY_WECHAT_GAME_MODE || GRAVITY_BILIBILI_GAME_MODE || GRAVITY_MEITUAN_GAME_MODE || GRAVITY_BYTEDANCE_GAME_MODE || GRAVITY_BYTEDANCE_TT_GAME_MODE || GRAVITY_KUAISHOU_WEBGL_GAME_MODE || GRAVITY_ALIPAY_GAME_MODE || GRAVITY_XIAOMI_GAME_MODE
-            return (int) (_wechatGameDeviceInfo?.screenWidth ?? 0);
-#else
+            if (GEPlatformManager.IsGePlatform())
+            {
+                return (int)(_miniGameDeviceInfo?.screenWidth ?? 0);
+            }
             return (int)(UnityEngine.Screen.currentResolution.width);
-#endif
         }
 
         //屏幕高度
@@ -310,11 +318,11 @@ namespace GravitySDK.PC.Utils
             {
                 return 0;
             }
-#if GRAVITY_WECHAT_GAME_MODE || GRAVITY_BILIBILI_GAME_MODE || GRAVITY_MEITUAN_GAME_MODE || GRAVITY_BYTEDANCE_GAME_MODE || GRAVITY_BYTEDANCE_TT_GAME_MODE || GRAVITY_KUAISHOU_WEBGL_GAME_MODE || GRAVITY_ALIPAY_GAME_MODE || GRAVITY_XIAOMI_GAME_MODE
-            return (int) (_wechatGameDeviceInfo?.screenHeight ?? 0);
-#else
+            if (GEPlatformManager.IsGePlatform())
+            {
+                return (int)(_miniGameDeviceInfo?.screenHeight ?? 0);
+            }
             return (int)(UnityEngine.Screen.currentResolution.height);
-#endif
         }
 
         //显卡厂商名称
@@ -324,11 +332,11 @@ namespace GravitySDK.PC.Utils
             {
                 return "";
             }
-#if GRAVITY_WECHAT_GAME_MODE || GRAVITY_BILIBILI_GAME_MODE || GRAVITY_MEITUAN_GAME_MODE || GRAVITY_BYTEDANCE_GAME_MODE || GRAVITY_BYTEDANCE_TT_GAME_MODE || GRAVITY_OPPO_GAME_MODE || GRAVITY_HUAWEI_GAME_MODE || GRAVITY_XIAOMI_GAME_MODE
-            return _wechatGameDeviceInfo != null ? _wechatGameDeviceInfo.brand : "";
-#else
+            if (GEPlatformManager.IsGePlatform())
+            {
+                return (_miniGameDeviceInfo != null && _miniGameDeviceInfo.brand != null) ? _miniGameDeviceInfo.brand : "";
+            }
             return SystemInfo.graphicsDeviceVendor;
-#endif
         }
 
         //设备型号
@@ -338,11 +346,11 @@ namespace GravitySDK.PC.Utils
             {
                 return "";
             }
-#if GRAVITY_WECHAT_GAME_MODE || GRAVITY_BILIBILI_GAME_MODE || GRAVITY_MEITUAN_GAME_MODE || GRAVITY_BYTEDANCE_GAME_MODE || GRAVITY_BYTEDANCE_TT_GAME_MODE || GRAVITY_KUAISHOU_WEBGL_GAME_MODE || GRAVITY_OPPO_GAME_MODE || GRAVITY_HUAWEI_GAME_MODE || GRAVITY_XIAOMI_GAME_MODE
-            return _wechatGameDeviceInfo != null ? _wechatGameDeviceInfo.model : "";
-#else
+            if (GEPlatformManager.IsGePlatform())
+            {
+                return _miniGameDeviceInfo != null ? _miniGameDeviceInfo.model : "";
+            }
             return SystemInfo.deviceModel;
-#endif
         }
 
         //本机语言
@@ -352,10 +360,11 @@ namespace GravitySDK.PC.Utils
             {
                 return "";
             }
-#if GRAVITY_WECHAT_GAME_MODE || GRAVITY_BILIBILI_GAME_MODE || GRAVITY_MEITUAN_GAME_MODE || GRAVITY_BYTEDANCE_GAME_MODE || GRAVITY_BYTEDANCE_TT_GAME_MODE || GRAVITY_KUAISHOU_WEBGL_GAME_MODE || GRAVITY_ALIPAY_GAME_MODE || GRAVITY_OPPO_GAME_MODE || GRAVITY_HUAWEI_GAME_MODE || GRAVITY_XIAOMI_GAME_MODE
-            return _wechatGameDeviceInfo != null ? _wechatGameDeviceInfo.language : "";
-#else
-switch (Application.systemLanguage)
+            if (GEPlatformManager.IsGePlatform())
+            {
+                return _miniGameDeviceInfo != null ? _miniGameDeviceInfo.language : "";
+            }
+            switch (Application.systemLanguage)
             {
                 case SystemLanguage.Afrikaans:
                     return "af";
@@ -446,7 +455,6 @@ switch (Application.systemLanguage)
 
             };
             return "";
-#endif
         }
     }
 }

@@ -162,6 +162,17 @@ namespace GravitySDK.PC.Constant
         public static readonly string CRASH_REASON = "$app_crashed_reason";
 
         // host
-        public static readonly string SERVER_URL = "https://api.gravity-engine.com";
+        public static string SERVER_URL = "https://api.gravity-engine.com";
+        public static void SET_SERVER_URL(bool isChina = true)
+        {
+            if (isChina)
+            {
+                SERVER_URL = "https://api.gravity-engine.com";
+            }
+            else
+            {
+                SERVER_URL = "https://global-api.gravity-engine.com";
+            }
+        }
     }
 }

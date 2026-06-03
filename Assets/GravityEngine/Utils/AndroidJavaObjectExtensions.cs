@@ -1,3 +1,4 @@
+#if UNITY_ANDROID && !UNITY_EDITOR
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -96,3 +97,4 @@ namespace GravityEngine.Utils
 
     }
 }
+#endif

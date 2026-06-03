@@ -1,11 +1,17 @@
 ﻿using UnityEngine;
 using System;
-using System.Xml;
 using System.Collections.Generic;
 using System.Globalization;
 using GravitySDK.PC.Config;
 using GravitySDK.PC.Constant;
 using GravitySDK.PC.Storage;
+using System.Security.Cryptography;
+using System.Text;
+
+
+#if !GRAVITY_CONFIG_XML_READER_CLOSE
+using System.Xml;
+#endif
 
 namespace GravitySDK.PC.Utils
 {
@@ -13,6 +19,31 @@ namespace GravitySDK.PC.Utils
     {
         public GravitySDKUtil()
         {
+        }
+
+        public static string MD5Str(string input)
+        {
+            try
+            {
+                using (MD5 md5 = MD5.Create())
+                {
+                    // 将字符串转为字节数组
+                    byte[] inputBytes = Encoding.UTF8.GetBytes(input);
+                    // 计算 MD5 哈希
+                    byte[] hashBytes = md5.ComputeHash(inputBytes);
+                    // 转为16进制字符串
+                    StringBuilder sb = new StringBuilder();
+                    foreach (byte b in hashBytes)
+                    {
+                        sb.Append(b.ToString("x2")); // 小写
+                    }
+                    return sb.ToString();
+                }
+            }
+            catch (Exception e)
+            {
+                return "";
+            }
         }
 
         public static List<string> DisPresetProperties = GravitySDKUtil.GetDisPresetProperties();
@@ -58,6 +89,7 @@ namespace GravitySDK.PC.Utils
         {
             List<string> properties = new List<string>();
 
+#if !GRAVITY_CONFIG_XML_READER_CLOSE
             TextAsset textAsset = Resources.Load<TextAsset>("ge_public_config");
             if (textAsset != null && textAsset.text != null)
             {
@@ -90,7 +122,7 @@ namespace GravitySDK.PC.Utils
                     }
                 }
             }
-
+#endif
             return properties;
         }
 
@@ -231,6 +263,10 @@ namespace GravitySDK.PC.Utils
         //向Dictionary添加Dictionary
         public static void AddDictionary(Dictionary<string, object> originalDic, Dictionary<string, object> subDic)
         {
+            if(originalDic == null || subDic == null)
+            {
+                return;
+            }
             foreach (KeyValuePair<string, object> kv in subDic)
             {
                 originalDic[kv.Key] = kv.Value;

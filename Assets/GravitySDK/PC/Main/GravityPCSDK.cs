@@ -14,27 +14,8 @@ using GravitySDK.PC.Time;
 using GravitySDK.PC.Utils;
 using UnityEngine;
 using UnityEngine.Networking;
+using GravityEngine.Platform;
 
-#if GRAVITY_WECHAT_GAME_MODE || GRAVITY_BILIBILI_GAME_MODE || GRAVITY_MEITUAN_GAME_MODE
-using WeChatWASM;
-#elif GRAVITY_BYTEDANCE_GAME_MODE
-using StarkSDKSpace;
-#elif GRAVITY_BYTEDANCE_TT_GAME_MODE
-using TTSDK;
-#elif GRAVITY_KUAISHOU_GAME_MODE
-using com.kwai.mini.game;
-using com.kwai.mini.game.config;
-#elif GRAVITY_KUAISHOU_WEBGL_GAME_MODE
-using KSWASM;
-#elif GRAVITY_OPPO_GAME_MODE
-using QGMiniGame;
-#elif GRAVITY_HUAWEI_GAME_MODE
-using HWWASM;
-#elif GRAVITY_ALIPAY_GAME_MODE
-using AlipaySdk;
-#elif GRAVITY_XIAOMI_GAME_MODE
-using mi;
-#endif
 
 namespace GravitySDK.PC.Main
 {
@@ -393,110 +374,19 @@ namespace GravitySDK.PC.Main
 
         public static void Initialize(string clientId, string name, int version, string openid, bool enableSyncAttribution, IInitializeCallback initializeCallback)
         {
-#if GRAVITY_WECHAT_GAME_MODE || GRAVITY_BILIBILI_GAME_MODE || GRAVITY_MEITUAN_GAME_MODE
-            LaunchOptionsGame launchOptionsSync = WX.GetLaunchOptionsSync();
-            var launchQuery = launchOptionsSync.query;
-            var launchScene = launchOptionsSync.scene;
-#elif GRAVITY_BYTEDANCE_GAME_MODE
-            LaunchOption launchOptionsSync = StarkSDK.API.GetLaunchOptionsSync();
-            var launchQuery = new Dictionary<string, string>();
-            var launchScene = "";
-            if (launchOptionsSync != null)
-            {
-                launchQuery = launchOptionsSync.Query;
-                launchScene = launchOptionsSync.Scene;
-            }
-#elif GRAVITY_BYTEDANCE_TT_GAME_MODE
-            LaunchOption launchOptionsSync = TT.GetLaunchOptionsSync();
-            var launchQuery = new Dictionary<string, string>();
-            var launchScene = "";
-            if (launchOptionsSync != null)
-            {
-                launchQuery = launchOptionsSync.Query;
-                launchScene = launchOptionsSync.Scene;   
-            }
-#elif GRAVITY_KUAISHOU_GAME_MODE
-#if KUAISHOU_BELOW_121_VERSION
-            KSOutLaunchOption launchOption = KSConfig.kSOutLaunchOption;
-#else 
-            KSOutLaunchOption launchOption = KS.GetLaunchOptionSync();
-#endif
-            var launchQuery = launchOption.query;
-            var launchScene = launchOption.from;
-#elif GRAVITY_KUAISHOU_WEBGL_GAME_MODE
-            LaunchOptions launchOption = KS.GetLaunchOptionSync();
-            var launchQuery = launchOption.query;
-            var launchScene = launchOption.from;
-#elif GRAVITY_ALIPAY_GAME_MODE
+
             Dictionary<string, string> launchQuery = new Dictionary<string, string>();
             var launchScene = "";
-            
-            AlipaySDK.API.GetLaunchOptions((result) =>
+
+            if (GEPlatformManager.isMiniGame())
             {
-                // TEST  {"query":{"key1":"value1","key2":"value2"},"referrerInfo":{}}
-                // result = "{\"query\":{\"key1\":\"value1\",\"key2\":\"value2\"},\"referrerInfo\":{}}";
-                Debug.Log("alipay launch info is " + result);
-                if (result!=null)
+                GEPlatformManager.GetLaunchOptionsSync((pQuery, pScene) =>
                 {
-                    Dictionary<string, object> launchOptionDict = GE_MiniJson.Deserialize(result);
-                    if (launchOptionDict.TryGetValue("query", out var queryStr))
-                    {
-                        Dictionary<string, object> queryDict = (Dictionary<string, object>) queryStr;
-                        launchQuery = ConvertToDictionary(queryDict);
-                        Debug.Log("alipay query got");
-                    }
-                    else
-                    {
-                        Debug.Log("alipay query is null");
-                    }
-                }
-                else
-                {
-                    Debug.Log("alipay launch option is null");
-                }
-            });
-#elif GRAVITY_OPPO_GAME_MODE
-            Dictionary<string, string> launchQuery = new Dictionary<string, string>();
-            var launchScene = "";
-            var launchStr =  QG.GetEnterOptionsSync();
-            Debug.Log("oppo quickgame launch info is " + launchStr);
-            if (launchStr!=null)
-            {
-                Dictionary<string, object> launchOptionDict = GE_MiniJson.Deserialize(launchStr);
-                if (launchOptionDict.TryGetValue("query", out var queryStr))
-                {
-                    Dictionary<string, object> queryDict = (Dictionary<string, object>) queryStr;
-                    launchQuery = ConvertToDictionary(queryDict);
-                    Debug.Log("oppo quickgame query got");
-                }
-                else
-                {
-                    Debug.Log("oppo quickgame query is null");
-                }
+                    launchQuery = pQuery;
+                    launchScene = pScene;
+                });
             }
-#elif GRAVITY_HUAWEI_GAME_MODE
-            Dictionary<string, string> launchQuery = new Dictionary<string, string>();
-            var launchScene = "";
-            GetLaunchOptionsSyncResult result = QG.GetLaunchOptionsSync();
-            Debug.Log("huawei quickgame launch info is " + result);
-            if (result!=null)
-            {
-                Dictionary<string, object> queryDict = GE_MiniJson.Deserialize(result.query);
-                launchQuery = ConvertToDictionary(queryDict);
-                Debug.Log("huawei quickgame query got");
-            }
-#elif GRAVITY_XIAOMI_GAME_MODE
-            Dictionary<string, string> launchQuery = new Dictionary<string, string>();
-            QGLaunchInfo launchInfo = MiGetOptions.Instance.GetLaunchOptionsSync();
-            var launchScene = "" + launchInfo.scene;
-            if (launchInfo.query.type != null)
-            {
-                launchQuery["type"] = launchInfo.query.type;
-            }
-#else
-            Dictionary<string, string> launchQuery = new Dictionary<string, string>();
-            var launchScene = "";
-#endif
+
             string launchSceneStr = "" + launchScene;
             if (!string.IsNullOrEmpty(launchSceneStr))
             {
@@ -513,7 +403,7 @@ namespace GravitySDK.PC.Main
                         if (GravityHelper.IsLaunchCacheValid())
                         {
                             // 尝试获取当前cache
-                            string cacheSceneStr = (string) GravitySDKFile.GetData("scene_cache", typeof(string));
+                            string cacheSceneStr = (string)GravitySDKFile.GetData("scene_cache", typeof(string));
                             if (!string.IsNullOrEmpty(cacheSceneStr))
                             {
                                 // cache有值，使用之
@@ -527,7 +417,7 @@ namespace GravitySDK.PC.Main
                     Debug.Log("get cache scene warning");
                     Debug.Log(e);
                 }
-                
+
                 UserSetOnce(new Dictionary<string, object>()
                 {
                     {"$channel", GravityHelper.GetChannel()},
@@ -535,33 +425,23 @@ namespace GravitySDK.PC.Main
                     {GravitySDKConstant.DEVICE_MODEL, GravitySDKDeviceInfo.DeviceModel()},
                     {GravitySDKConstant.DEVICE_BRAND, GravitySDKDeviceInfo.Manufacture().ToUpper()},
                     {GravitySDKConstant.OS, GravitySDKDeviceInfo.OS()},
-                    {"$first_visit_time", GravityEngineWrapper.GetTimeString(DateTime.Now)},
+                    {"$first_visit_time", GravityWrapperManager.GetTimeString(DateTime.Now)},
                     {"$first_scene", "" + launchSceneStr}
                 });
                 // 使用完之后要清空
                 GravitySDKFile.DeleteData("query_cache");
                 GravitySDKFile.DeleteData("scene_cache");
                 GravitySDKFile.DeleteData("latest_cache_timestamp");
-                
+
                 Flush();
             });
         }
-        
-        static Dictionary<string, string> ConvertToDictionary(Dictionary<string, object> sourceDict)
-        {
-            var targetDict = new Dictionary<string, string>();
-            
-            if (sourceDict == null) return targetDict;
-            foreach (var kvp in sourceDict)
-            {
-                // 尝试将值转换为字符串
-                string stringValue = kvp.Value?.ToString();
-                targetDict[kvp.Key] = stringValue;
-            }
 
-            return targetDict;
+        public static void UpdateUserInfo(Dictionary<string, object> properties)
+        {
+            GravityHelper.UpdateUserInfo(properties);
         }
-        
+
         public static void TrackPayEvent(int payAmount, string payType, string orderId, string payReason,
             string payMethod)
         {
@@ -575,7 +455,7 @@ namespace GravitySDK.PC.Main
             });
             Flush();
         }
-        
+
         public static void BindTAThirdPlatform(string taAccountId, string taDistinctId)
         {
             Track("$BindThirdPlatform", new Dictionary<string, object>()

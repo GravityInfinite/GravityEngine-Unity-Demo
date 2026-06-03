@@ -1,0 +1,26 @@
+import { GravityEngineUnityAPI } from '@gravityengine/analytics';
+import { common } from '@kit.AbilityKit';
+
+export function RegisterGravityEngineUnityChannel() {
+  let register :Record<string,object>= {} ;
+  register["GravityEngineUnityChannel"] =  GravityEngineUnityChannel;
+  return register;
+}
+
+export class GravityEngineUnityChannel{
+  static onUnityAppStart(context:common.Context,wantParameters? : Record<string, Object>){
+    GravityEngineUnityAPI.onUnityAppStart(context,wantParameters)
+  }
+
+  static ge_initUnityNativeChannel(callback: (type: string , jsonData:string) => string) {
+    GravityEngineUnityAPI.setUnityCallBack({
+      onNeedCallUnity(methodName:string,dataStr:string): string{
+        return callback?.(methodName, dataStr);
+      }
+    })
+  }
+
+  static ge_onUnityCallNative(methodName: string, argStr: string): string {
+    return GravityEngineUnityAPI.ge_onUnityCallNative(methodName, argStr)
+  }
+}

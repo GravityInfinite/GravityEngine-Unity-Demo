@@ -13,6 +13,7 @@ using GravitySDK.PC.TaskManager;
 using GravitySDK.PC.Time;
 using GravitySDK.PC.Utils;
 using UnityEngine;
+using GravityEngine.Platform;
 
 namespace GravitySDK.PC.Main
 {
@@ -56,9 +57,9 @@ namespace GravitySDK.PC.Main
         private MonoBehaviour mMono;
         private static MonoBehaviour sMono;
         private GravitySDKAutoTrack mAutoTrack;
-#if GRAVITY_WECHAT_GAME_MODE || GRAVITY_BILIBILI_GAME_MODE || GRAVITY_MEITUAN_GAME_MODE || GRAVITY_BYTEDANCE_GAME_MODE || GRAVITY_BYTEDANCE_TT_GAME_MODE || GRAVITY_BYTEDANCE_TT_GAME_MODE || GRAVITY_KUAISHOU_GAME_MODE || GRAVITY_KUAISHOU_WEBGL_GAME_MODE || GRAVITY_OPPO_GAME_MODE || GRAVITY_HUAWEI_GAME_MODE || GRAVITY_XIAOMI_GAME_MODE || GRAVITY_XIAOMI_GAME_MODE || GRAVITY_ALIPAY_GAME_MODE
-        private WeChatGameAutoTrack mWechatGameAutoTrack;
-#endif
+
+        private GEMiniGameAutoTrack mMiniGameAutoTrack;
+
 
         ResponseHandle mResponseHandle;
 
@@ -84,7 +85,7 @@ namespace GravitySDK.PC.Main
         {
             this.mMono = mono;
             sMono = mono;
-            mResponseHandle = delegate(Dictionary<string, object> result) { mTask.Release(); };
+            mResponseHandle = delegate (Dictionary<string, object> result) { mTask.Release(); };
             if (config == null)
             {
                 this.mConfig = GravitySDKConfig.GetInstance(server, instanceName);
@@ -119,22 +120,24 @@ namespace GravitySDK.PC.Main
 
             DefaultData();
             mCurrentInstance = this;
-            // 动态加载 GravitySDKTask GravitySDKAutoTrack WeChatGameAutoTrack
+            // 动态加载 GravitySDKTask GravitySDKAutoTrack GEMiniGameAutoTrack
             GameObject mGravitySDKTask = new GameObject("GravitySDKTask", typeof(GravitySDKTask));
             UnityEngine.Object.DontDestroyOnLoad(mGravitySDKTask);
 
             // 挂在采集器，开启App的自动采集
             GameObject mGravitySDKAutoTrack = new GameObject("GravitySDKAutoTrack", typeof(GravitySDKAutoTrack));
-            this.mAutoTrack = (GravitySDKAutoTrack) mGravitySDKAutoTrack.GetComponent(typeof(GravitySDKAutoTrack));
+            this.mAutoTrack = (GravitySDKAutoTrack)mGravitySDKAutoTrack.GetComponent(typeof(GravitySDKAutoTrack));
             UnityEngine.Object.DontDestroyOnLoad(mGravitySDKAutoTrack);
 
-#if GRAVITY_WECHAT_GAME_MODE || GRAVITY_BILIBILI_GAME_MODE || GRAVITY_MEITUAN_GAME_MODE || GRAVITY_BYTEDANCE_GAME_MODE || GRAVITY_BYTEDANCE_TT_GAME_MODE || GRAVITY_KUAISHOU_GAME_MODE || GRAVITY_KUAISHOU_WEBGL_GAME_MODE || GRAVITY_OPPO_GAME_MODE || GRAVITY_HUAWEI_GAME_MODE || GRAVITY_XIAOMI_GAME_MODE || GRAVITY_XIAOMI_GAME_MODE || GRAVITY_ALIPAY_GAME_MODE
-            // 挂载采集器，以开启微信、抖音、快手小游戏、OPPO快游戏、支付宝小游戏的自动采集
-            GameObject mWechatGameAutoTrackObj = new GameObject("WechatGameAutoTrack", typeof(WeChatGameAutoTrack));
-            mWechatGameAutoTrack =
-                (WeChatGameAutoTrack) mWechatGameAutoTrackObj.GetComponent(typeof(WeChatGameAutoTrack));
-            UnityEngine.Object.DontDestroyOnLoad(mWechatGameAutoTrackObj);
-#endif
+            if (GEPlatformManager.isMiniGame())
+            {
+                // 挂载采集器，以开启微信、抖音、快手小游戏、OPPO快游戏、支付宝小游戏的自动采集
+                GameObject mGEMiniGameAutoTrackObj = new GameObject("GEMiniGameAutoTrack", typeof(GEMiniGameAutoTrack));
+                mMiniGameAutoTrack =
+                    (GEMiniGameAutoTrack)mGEMiniGameAutoTrackObj.GetComponent(typeof(GEMiniGameAutoTrack));
+                UnityEngine.Object.DontDestroyOnLoad(mGEMiniGameAutoTrackObj);
+            }
+
         }
 
         public GravitySDKTimeInter GetTime(DateTime dateTime)
@@ -161,7 +164,7 @@ namespace GravitySDK.PC.Main
         }
 
         //设置访客ID
-        public virtual void Identifiy(string distinctID)
+        public  void Identifiy(string distinctID)
         {
             if (IsPaused())
             {
@@ -175,7 +178,7 @@ namespace GravitySDK.PC.Main
             }
         }
 
-        public virtual string DistinctId()
+        public  string DistinctId()
         {
             this.mDistinctID =
                 (string) GravitySDKFile.GetData(GravitySDKConstant.DISTINCT_ID, typeof(string));
@@ -188,7 +191,7 @@ namespace GravitySDK.PC.Main
             return this.mDistinctID;
         }
 
-        public virtual void Login(string accountID)
+        public  void Login(string accountID)
         {
             if (IsPaused())
             {
@@ -205,14 +208,14 @@ namespace GravitySDK.PC.Main
             }
         }
 
-        public virtual string AccountID()
+        public  string AccountID()
         {
             this.mAccountID =
                 (string) GravitySDKFile.GetData(GravitySDKConstant.ACCOUNT_ID, typeof(string));
             return this.mAccountID;
         }
 
-        public virtual void Logout(ILogoutCallback logoutCallback)
+        public  void Logout(ILogoutCallback logoutCallback)
         {
             if (IsPaused())
             {
@@ -232,24 +235,28 @@ namespace GravitySDK.PC.Main
         }
 
         //TODO
-        public virtual void EnableAutoTrack(AUTO_TRACK_EVENTS events, Dictionary<string, object> properties)
+        public void EnableAutoTrack(AUTO_TRACK_EVENTS events, Dictionary<string, object> properties)
         {
             this.mAutoTrack.EnableAutoTrack(events, properties);
-#if GRAVITY_WECHAT_GAME_MODE || GRAVITY_BILIBILI_GAME_MODE || GRAVITY_MEITUAN_GAME_MODE || GRAVITY_BYTEDANCE_GAME_MODE || GRAVITY_BYTEDANCE_TT_GAME_MODE || GRAVITY_KUAISHOU_GAME_MODE || GRAVITY_KUAISHOU_WEBGL_GAME_MODE || GRAVITY_OPPO_GAME_MODE || GRAVITY_HUAWEI_GAME_MODE || GRAVITY_XIAOMI_GAME_MODE || GRAVITY_XIAOMI_GAME_MODE || GRAVITY_ALIPAY_GAME_MODE
-            mWechatGameAutoTrack.EnableAutoTrack(events, properties);
-#endif
+
+            if (GEPlatformManager.isMiniGame())
+            {
+                mMiniGameAutoTrack.EnableAutoTrack(events, properties);
+            }
         }
 
-        public virtual void EnableAutoTrack(AUTO_TRACK_EVENTS events, IAutoTrackEventCallback_PC eventCallback)
+        public void EnableAutoTrack(AUTO_TRACK_EVENTS events, IAutoTrackEventCallback_PC eventCallback)
         {
             this.mAutoTrack.EnableAutoTrack(events, eventCallback);
-#if GRAVITY_WECHAT_GAME_MODE || GRAVITY_BILIBILI_GAME_MODE || GRAVITY_MEITUAN_GAME_MODE || GRAVITY_BYTEDANCE_GAME_MODE || GRAVITY_BYTEDANCE_TT_GAME_MODE || GRAVITY_KUAISHOU_GAME_MODE || GRAVITY_KUAISHOU_WEBGL_GAME_MODE || GRAVITY_OPPO_GAME_MODE || GRAVITY_HUAWEI_GAME_MODE || GRAVITY_XIAOMI_GAME_MODE || GRAVITY_XIAOMI_GAME_MODE || GRAVITY_ALIPAY_GAME_MODE
-            mWechatGameAutoTrack.EnableAutoTrack(events, null);
-#endif
+
+            if (GEPlatformManager.isMiniGame())
+            {
+                mMiniGameAutoTrack.EnableAutoTrack(events, null);
+            }
         }
 
         // 设置自动采集事件的自定义属性
-        public virtual void SetAutoTrackProperties(AUTO_TRACK_EVENTS events, Dictionary<string, object> properties)
+        public  void SetAutoTrackProperties(AUTO_TRACK_EVENTS events, Dictionary<string, object> properties)
         {
             this.mAutoTrack.SetAutoTrackProperties(events, properties);
         }
@@ -417,9 +424,11 @@ namespace GravitySDK.PC.Main
         /// <summary>
         /// 发送数据
         /// </summary>
-        public virtual void Flush()
+        public void Flush()
         {
-            if (mEventSaveOnly == false)
+            int hasInit = UnityEngine.PlayerPrefs.HasKey("gravity_sdk_has_initialize") ? UnityEngine.PlayerPrefs.GetInt("gravity_sdk_has_initialize") : 0;
+            //有初始化成功过再上传数据
+            if (mEventSaveOnly == false && hasInit == 1)
             {
                 mTask.SyncInvokeAllTask();
 
@@ -513,7 +522,7 @@ namespace GravitySDK.PC.Main
             SendData(analyticsEvent);
         }
 
-        public virtual void SetSuperProperties(Dictionary<string, object> superProperties)
+        public  void SetSuperProperties(Dictionary<string, object> superProperties)
         {
             if (IsPaused())
             {
@@ -534,7 +543,7 @@ namespace GravitySDK.PC.Main
                 GravitySDKJSON.Serialize(this.mSupperProperties));
         }
 
-        public virtual void UnsetSuperProperty(string propertyKey)
+        public  void UnsetSuperProperty(string propertyKey)
         {
             if (IsPaused())
             {
@@ -559,7 +568,7 @@ namespace GravitySDK.PC.Main
                 GravitySDKJSON.Serialize(this.mSupperProperties));
         }
 
-        public virtual Dictionary<string, object> SuperProperties()
+        public  Dictionary<string, object> SuperProperties()
         {
             string propertiesStr =
                 (string) GravitySDKFile.GetData(GravitySDKConstant.SUPER_PROPERTY, typeof(string));
@@ -571,7 +580,7 @@ namespace GravitySDK.PC.Main
             return this.mSupperProperties;
         }
 
-        public virtual void ClearSuperProperties()
+        public  void ClearSuperProperties()
         {
             if (IsPaused())
             {

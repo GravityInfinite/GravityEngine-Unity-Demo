@@ -11,6 +11,7 @@ using System.IO.Compression;
 using System.Runtime.Serialization;
 using UnityEngine.Networking;
 using System.Collections;
+using GravitySDK.PC.GravityTurbo;
 
 namespace GravitySDK.PC.Request
 {
@@ -121,6 +122,9 @@ namespace GravitySDK.PC.Request
             {
                 webRequest.timeout = 30;
                 webRequest.SetRequestHeader("Content-Type", "application/x-www-form-urlencoded");
+                webRequest.SetRequestHeader("GE_LIB", GravitySDKAppInfo.LibName());
+                webRequest.SetRequestHeader("GE_LIB_VERSION", GravitySDKAppInfo.LibVersion());
+                webRequest.SetRequestHeader("GE_TOKEN", GravityHelper.GetAccessToken());
 
                 GravitySDKLogger.Print("Request URL=" + uri);
 

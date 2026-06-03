@@ -29,7 +29,7 @@ namespace GravityEngine
     {
         void onFailed(string errorMsg);
 
-        void onEmpty();
+        void onEmpty(GravityEngineAPI.DryRunEventEmpty dryRunEventEmpty);
 
         void onTrackPay(int backValue, string company, Dictionary<string, object> otherParams);
         

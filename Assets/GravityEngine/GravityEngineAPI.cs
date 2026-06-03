@@ -26,27 +26,8 @@ using GravitySDK.PC.Time;
 using GravitySDK.PC.Utils;
 using UnityEngine.Networking;
 using UnityEngine.SceneManagement;
+using GravityEngine.Platform;
 
-#if GRAVITY_WECHAT_GAME_MODE || GRAVITY_BILIBILI_GAME_MODE || GRAVITY_MEITUAN_GAME_MODE
-using WeChatWASM;
-#elif GRAVITY_BYTEDANCE_GAME_MODE
-using StarkSDKSpace;
-#elif GRAVITY_BYTEDANCE_TT_GAME_MODE
-using TTSDK;
-#elif GRAVITY_KUAISHOU_GAME_MODE
-using com.kwai.mini.game;
-using com.kwai.mini.game.config;
-#elif GRAVITY_KUAISHOU_WEBGL_GAME_MODE
-using KSWASM;
-#elif GRAVITY_OPPO_GAME_MODE
-using QGMiniGame;
-#elif GRAVITY_ALIPAY_GAME_MODE
-using AlipaySdk;
-#elif GRAVITY_HUAWEI_GAME_MODE
-using HWWASM;
-#elif GRAVITY_XIAOMI_GAME_MODE
-using mi;
-#endif
 
 namespace GravityEngine
 {
@@ -63,6 +44,9 @@ namespace GravityEngine
             public string clientId;
             public SDKRunMode mode;
             public SDKTimeZone timeZone;
+            public bool isChina; //是否中国国内，默认true
+            public bool enableCrashToGe; //是否上报SDK报错信息到引力
+            public bool enableCrashTo3D; //是否上报SDK报错信息到三方
 
             public string timeZoneId;
 
@@ -81,32 +65,53 @@ namespace GravityEngine
             public bool enableAndroidId;
             public bool enableMAC;
 
-            public Token(string accessToken, string clientId, string channel,
-                SDKRunMode mode = SDKRunMode.NORMAL, SDKTimeZone timeZone = SDKTimeZone.Local, string timeZoneId = null,
-                bool enableImei = true, bool enableOaid = true, bool enableAndroidId = true, bool enableMac = true, string instanceName = null)
+            public bool isGDPRArea;
+            public bool isCoppaEnabled;
+            public bool isKidsAppEnabled;
+            public bool adPersonalizationEnabled;
+            public bool adUserDataEnabled;
+            public string fbAppID;
+
+            public List<AndroidClientIdType> mClientIdPriorityOrder;
+
+            //前台会话阀值（频繁切换前后台，AppEnd时间会很小，可以设置这个值忽略这种操作）,当AppEnd发生时，事件少于设置的time，会忽略计时
+            public int foregroundSessionThreshold;
+
+
+            public Token(string accessToken, string clientId, string channel)
             {
                 this.accessToken = accessToken.Replace(" ", "");
                 this.clientId = clientId.Replace(" ", "");
                 this.channel = channel.Replace(" ", "");
-                this.mode = mode;
-                this.timeZone = timeZone;
-                this.timeZoneId = timeZoneId;
+                this.mode = SDKRunMode.NORMAL;
+                this.timeZone = SDKTimeZone.Local;
+                this.isChina = true;
+                this.enableCrashToGe = false;
+                this.enableCrashTo3D = false;
+
+                this.timeZoneId = null;
                 this.enableEncrypt = false;
-                this.enableIMEI = enableImei;
-                this.enableOAID= enableOaid;
-                this.enableAndroidId = enableAndroidId;
-                this.enableMAC = enableMac;
+                this.enableIMEI = true;
+                this.enableOAID = true;
+                this.enableAndroidId = true;
+                this.enableMAC = true;
                 this.encryptVersion = 0;
                 this.encryptPublicKey = null;
                 this.pinningMode = SSLPinningMode.NONE;
                 this.allowInvalidCertificates = false;
                 this.validatesDomainName = true;
-                if (!string.IsNullOrEmpty(instanceName))
-                {
-                    instanceName = instanceName.Replace(" ", "");
-                }
+                this.instanceName = null;
 
-                this.instanceName = instanceName;
+                this.isGDPRArea = false;
+                this.isCoppaEnabled = false;
+                this.isKidsAppEnabled = false;
+                this.adPersonalizationEnabled = false;
+                this.adUserDataEnabled = false;
+                this.fbAppID = "";
+
+                this.mClientIdPriorityOrder = null;
+
+                this.foregroundSessionThreshold = 0;
             }
 
             public string GetInstanceName()
@@ -136,6 +141,19 @@ namespace GravityEngine
 
                 return null;
             }
+
+            public List<int> mClientIdPriorityOrderInts()
+            {
+                List<int> result = new List<int>();
+                if (this.mClientIdPriorityOrder != null)
+                {
+                    foreach (AndroidClientIdType type in this.mClientIdPriorityOrder)
+                    {
+                        result.Add((int)type);
+                    }
+                }
+                return result;
+            }
         }
 
         public enum SDKTimeZone
@@ -157,10 +175,17 @@ namespace GravityEngine
 
         public enum NetworkType
         {
-            DEFAULT = 1,
-            WIFI = 2,
-            ALL = 3
+            DEFAULT = 0,
+            WIFI = 1,
+            ALL = 2
         }
+
+        public enum AndroidClientIdType
+        {
+            OAID = 0,
+            ANDROID_ID = 1
+        }
+
 
         [Header("Configuration")] [Tooltip("是否手动初始化SDK")]
         public bool startManually = true;
@@ -179,7 +204,7 @@ namespace GravityEngine
         {
             if (tracking_enabled)
             {
-                GravityEngineWrapper.Identify(firstId);
+                GravityWrapperManager.Identify(firstId);
             }
             else
             {
@@ -193,6 +218,85 @@ namespace GravityEngine
             }
         }
 
+        private static bool send_sdk_error_to_ge = false;
+        private static bool send_sdk_error_to_3d = false;
+
+        private static long last_sent_error_time = 0;
+        private static int has_sent_error_count = 0;
+
+
+        public static void TrackSdkError(string reasonStr, Dictionary<string, object> result)
+        {
+            long nowTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            if (nowTime - last_sent_error_time < 15)
+            {
+                return;
+            }
+            if (has_sent_error_count >= 10)
+            {
+                return;
+            }
+            last_sent_error_time = nowTime;
+            has_sent_error_count += 1;
+
+
+            if (result == null)
+            {
+                result = new Dictionary<string, object>();
+            }
+            if (send_sdk_error_to_ge)
+            {
+                try
+                {
+                    Dictionary<string, object> properties = new Dictionary<string, object>()
+                        {
+                            {GravitySDKConstant.CRASH_REASON, reasonStr + " "+ GravitySDKJSON.Serialize(result)}
+                        };
+                    GE_PropertiesChecker.MergeProperties(result, properties);
+                    GravityEngineAPI.Track(GravitySDKConstant.CRASH_EVENT, properties);
+                    GravityEngineAPI.Flush();
+                }
+                catch (Exception e)
+                {
+
+                }
+            }
+            if (send_sdk_error_to_3d)
+            {
+                try
+                {
+                    Dictionary<string, object> posthogChildProperties = new Dictionary<string, object>()
+                        {
+                            {"distinct_id", GetCurrentClientID()},
+                            {"$lib", GravitySDKAppInfo.LibName()+"-"+GravitySDKAppInfo.LibVersion()},
+                            {"GE_LIB", GravitySDKAppInfo.LibName()},
+                            {"GE_LIB_VERSION", GravitySDKAppInfo.LibVersion()},
+                            {"GE_TOKEN", GravitySDKUtil.MD5Str(GravityHelper.GetAccessToken())},
+                        };
+                    GE_PropertiesChecker.MergeProperties(result, posthogChildProperties);
+
+                    Dictionary<string, object> posthogProperties = new Dictionary<string, object>()
+                        {
+                            {"api_key", "phc_tcHf8WBy2imjcXNmnnyqEBfayZHKLjuVra2nEUm98GqL"},
+                            {"event", reasonStr},
+                            {"timestamp", DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ")},
+                            {"properties", posthogChildProperties}
+                        };
+                    UnityWebRequestMgr.Instance.SimplePost("https://us.i.posthog.com/capture/", posthogProperties,
+                    (request =>
+                    {
+                        string responseText = request.downloadHandler.text;
+                        Dictionary<string, object> res = GE_MiniJson.Deserialize(responseText);
+                        Debug.Log("posthog response is " + responseText);
+                    }));
+                }
+                catch (Exception e)
+                {
+
+                }
+            }
+        }
+
         /// <summary>
         /// 返回当前的访客 ID.
         /// </summary>
@@ -201,7 +305,7 @@ namespace GravityEngine
         {
             if (tracking_enabled)
             {
-                return GravityEngineWrapper.GetDistinctId();
+                return GravityWrapperManager.GetDistinctId();
             }
 
             return null;
@@ -215,7 +319,7 @@ namespace GravityEngine
         {
             // if (tracking_enabled)
             // {
-            //     GravityEngineWrapper.Login(account);
+            //     GravityWrapperManager.Login(account);
             // }
             // else
             // {
@@ -236,7 +340,7 @@ namespace GravityEngine
         {
             // if (tracking_enabled)
             // {
-            //     GravityEngineWrapper.Logout(logoutCallback);
+            //     GravityWrapperManager.Logout(logoutCallback);
             // }
             // else
             // {
@@ -264,7 +368,7 @@ namespace GravityEngine
                     properties = new Dictionary<string, object>();
                 }
 
-                GravityEngineWrapper.EnableAutoTrack(events, properties);
+                GravityWrapperManager.EnableAutoTrack(events, properties);
                 // C#异常捕获提前，包含所有端
                 if ((events & AUTO_TRACK_EVENTS.APP_CRASH) != 0 && !GE_PublicConfig.DisableCSharpException)
                 {
@@ -302,7 +406,7 @@ namespace GravityEngine
         {
             if (tracking_enabled)
             {
-                GravityEngineWrapper.SetAutoTrackProperties(events, properties);
+                GravityWrapperManager.SetAutoTrackProperties(events, properties);
                 // C#异常捕获提前，包含所有端
                 if ((events & AUTO_TRACK_EVENTS.APP_CRASH) != 0 && !GE_PublicConfig.DisableCSharpException)
                 {
@@ -331,9 +435,10 @@ namespace GravityEngine
         {
             // join query's key and value with =, and join all query with &, ignore the last &
             string queryStr = "";
-            foreach (KeyValuePair<string, string> kv in query)
+            Dictionary<string, string> modified_query = GravityHelper.ReSetAdParams(query);
+            foreach (KeyValuePair<string, string> kv in modified_query)
             {
-                queryStr += kv.Key + "=" + kv.Value + "&";
+                queryStr += Uri.EscapeDataString(kv.Key) + "=" + Uri.EscapeDataString(kv.Value) + "&";
             }
 
             queryStr = queryStr.Length > 0 ? queryStr.Substring(0, queryStr.Length - 1) : "";
@@ -384,12 +489,9 @@ namespace GravityEngine
         /// </summary>
         /// <param name="target">shareType 分享类型：APP_MESSAGE / TIME_LINE</param>
         /// <param name="properties">默认传null</param>
-        public static void TrackMPShare(string target, Dictionary<string, object> properties = null)
+        public static object TrackMPShare(string target, Dictionary<string, object> properties = null)
         {
-#if GRAVITY_WECHAT_GAME_MODE && ENABLE_TENCENT_SDK_TRACK
-            DnSdkHelper.onShare(target);
-            Debug.Log("tencent sdk onShare " + target);
-#endif
+            object result = GEPlatformManager.TrackMPShare(target, properties);
             if (properties == null)
             {
                 properties = new Dictionary<string, object>();
@@ -398,38 +500,37 @@ namespace GravityEngine
             }
             properties["$share_target"] = target;
             Track(GravitySDKConstant.MP_SHARE, properties);
+            return result;
         }
 
         /// <summary>
         /// 在用户收藏小游戏的时候上报，包括收藏、添加到我的小程序、添加到桌面以及小游戏自己定义的收藏逻辑。
         /// </summary>
         /// <param name="wishType">wishType 类型枚举值：普通收藏（default）/添加到我的小程序（my）/添加到桌面（desktop）/其他</param>
-        public static void TrackMPAddFavorites(string wishType = "default")
+        /// <returns>当前调用腾讯sdk track 事件的结果（如果有），没有会返回null
+        public static object TrackMPAddFavorites(string wishType = "default")
         {
-#if GRAVITY_WECHAT_GAME_MODE && ENABLE_TENCENT_SDK_TRACK
-            DnSdkHelper.onAddToWishlist(wishType);
-            Debug.Log("tencent sdk onAddToWishlist " + wishType);
-#endif
+            object result = GEPlatformManager.TrackMPAddFavorites(wishType);
             Track(GravitySDKConstant.MP_ADD_FAVORITES);
             Flush();
+            return result;
         }
         
         /// <summary>
         /// 用户在小游戏内创建角色成功后上报 CREATE_ROLE 行为，可添加创建角色相关的自定义参数，如角色名等。
         /// </summary>
         /// <param name="roleName">角色名</param>
-        public static void TrackMPCreateRole(string roleName)
+        /// <returns>当前调用腾讯sdk track 事件的结果（如果有），没有会返回null
+        public static object TrackMPCreateRole(string roleName)
         {
-#if GRAVITY_WECHAT_GAME_MODE && ENABLE_TENCENT_SDK_TRACK
-            DnSdkHelper.onCreateRole(roleName);
-            Debug.Log("tencent sdk onCreateRole " + roleName);
-#endif
+            object result = GEPlatformManager.TrackMPCreateRole(roleName);
             var properties = new Dictionary<string, object>()
             {
                 {"$role_name", roleName},
             };
             Track("$CreateRole", properties);
             Flush();
+            return result;
         }
         
         public static void TryCreateRoleEventDryRun(string roleName)
@@ -447,14 +548,13 @@ namespace GravityEngine
         /// <summary>
         /// 在用户完成游戏新手指引教程或者完成教程关卡后上报 TUTORIAL_FINISH 行为。
         /// </summary>
-        public static void TrackMPTutorialFinish()
+        /// <returns>当前调用腾讯sdk track 事件的结果（如果有），没有会返回null
+        public static object TrackMPTutorialFinish()
         {
-#if GRAVITY_WECHAT_GAME_MODE && ENABLE_TENCENT_SDK_TRACK
-            DnSdkHelper.onTutorialFinish();
-            Debug.Log("tencent sdk onTutorialFinish");
-#endif
+            object result = GEPlatformManager.TrackMPTutorialFinish();
             Track("$TutorialFinish");
             Flush();
+            return result;
         }
         
         public static void TryTutorialFinishEventDryRun()
@@ -477,11 +577,7 @@ namespace GravityEngine
             }
             else
             {
-#if GRAVITY_WECHAT_GAME_MODE && ENABLE_TENCENT_SDK_TRACK
-                // 付费
-                DnSdkHelper.onPurchase(amount);
-                Debug.Log("tencent sdk onPurchase " + amount);
-#endif
+                GEPlatformManager.onPurchase(amount);
             }
         }
         
@@ -490,12 +586,9 @@ namespace GravityEngine
         /// </summary>
         /// <param name="level">游戏等级</param>
         /// <param name="power">游戏能量</param>
-        public static void TrackMPUpdateLevel(int level, int power)
+        public static object TrackMPUpdateLevel(int level, int power)
         {
-#if GRAVITY_WECHAT_GAME_MODE && ENABLE_TENCENT_SDK_TRACK
-            DnSdkHelper.onUpdateLevel(level, power);
-            Debug.Log("tencent sdk onUpdateLevel " + level + " " + power);
-#endif
+            object result = GEPlatformManager.TrackMPUpdateLevel(level, power);
             var properties = new Dictionary<string, object>()
             {
                 {"$user_level", level},
@@ -503,32 +596,29 @@ namespace GravityEngine
             };
             Track("$UpdateLevel", properties);
             Flush();
+            return result;
         }
         
         /// <summary>
         /// 用户在小游戏内浏览商城页面时上报。
         /// </summary>
-        public static void TrackMPViewMallContent()
+        public static object TrackMPViewMallContent()
         {
-#if GRAVITY_WECHAT_GAME_MODE && ENABLE_TENCENT_SDK_TRACK
-            DnSdkHelper.onViewContent("Mall");
-            Debug.Log("tencent sdk onViewContentMall");
-#endif
+            object result = GEPlatformManager.TrackMPViewMallContent();
             Track("$ViewMallContent");
             Flush();
+            return result;
         }     
         
         /// <summary>
         /// 用户在小游戏内浏览活动页面时上报。
         /// </summary>
-        public static void TrackMPViewActivityContent()
+        public static object TrackMPViewActivityContent()
         {
-#if GRAVITY_WECHAT_GAME_MODE && ENABLE_TENCENT_SDK_TRACK
-            DnSdkHelper.onViewContent("Activity");
-            Debug.Log("tencent sdk onViewContentActivity");
-#endif
+            object result = GEPlatformManager.TrackMPViewActivityContent();
             Track("$ViewActivityContent");
             Flush();
+            return result;
         }
 
         /// <summary>
@@ -543,7 +633,7 @@ namespace GravityEngine
                 GE_Log.e("taAccountId or taDistinctId must be required");
                 return;
             }
-            GravityEngineWrapper.BindTAThirdPlatform(taAccountId, taDistinctId);
+            GravityWrapperManager.BindTAThirdPlatform(taAccountId, taDistinctId);
         }
 
         /// <summary>
@@ -558,20 +648,18 @@ namespace GravityEngine
         public static string TrackPayEvent(int payAmount, string payType, string orderId, string payReason,
             string payMethod)
         {
-            return GravityEngineWrapper.TrackPayEvent(payAmount, payType, orderId, payReason, payMethod);
+            return GravityWrapperManager.TrackPayEvent(payAmount, payType, orderId, payReason, payMethod);
         }
         
         /// <summary>
         /// 仅上报付费事件到腾讯SDK
         /// </summary>
         /// <param name="payAmount">付费金额 单位为分</param>
-        public static void TrackPayEventToTencent(int payAmount)
+        /// <returns>当前调用腾讯sdk track 事件的结果（如果有），没有会返回null
+        public static object TrackPayEventToTencent(int payAmount)
         {
             Debug.Log("only to Tencent pay " + payAmount);
-#if GRAVITY_WECHAT_GAME_MODE && ENABLE_TENCENT_SDK_TRACK
-            DnSdkHelper.onPurchase(payAmount);
-            Debug.Log("tencent sdk onPurchase " + payAmount);
-#endif
+            return GEPlatformManager.onPurchase(payAmount);
         }
         
         /// <summary>
@@ -581,9 +669,10 @@ namespace GravityEngine
         /// <param name="traceId">订单TrackPayEvent返回的的traceId</param>
         public static void FilterAndReportPayEventToTencent(int payAmount, string traceId)
         {
-#if GRAVITY_WECHAT_GAME_MODE && ENABLE_TENCENT_SDK_TRACK
-            GravityEngineWrapper.FilterAndReportPayEventToTencent(payAmount, traceId);
-#endif
+            if (GEPlatformManager.CanFilterAndReportPayEventToTencent())
+            {
+                GravityWrapperManager.FilterAndReportPayEventToTencent(payAmount, traceId);
+            }
         }
 
         /// <summary>
@@ -598,7 +687,7 @@ namespace GravityEngine
         public static void TrackNativeAppAdShowEvent(string adUnionType, string adPlacementId, string adSourceId,
             string adType, string adnType, float ecpm)
         {
-            GravityEngineWrapper.TrackNativeAppAdShowEvent(adUnionType, adPlacementId, adSourceId, adType, adnType,
+            GravityWrapperManager.TrackNativeAppAdShowEvent(adUnionType, adPlacementId, adSourceId, adType, adnType,
                 ecpm);
         }
 
@@ -633,17 +722,17 @@ namespace GravityEngine
         public static void TrackMiniGameAdShowEvent(string adType, string adUnitId,
             Dictionary<string, object> otherProperties = null)
         {
-#if !GRAVITY_BYTEDANCE_GAME_MODE && !GRAVITY_KUAISHOU_GAME_MODE
-            var properties = new Dictionary<string, object>()
-            {
-                {"$ad_type", adType},
-                {"$ad_unit_id", adUnitId},
-                {"$adn_type", "wechat"}
-            };
-            GE_PropertiesChecker.MergeProperties(otherProperties, properties);
-            Track("$AdShow", properties);
-            Flush(); 
-#endif
+            if (GEPlatformManager.CanTrackMiniGameAdShowEvent()) {
+                var properties = new Dictionary<string, object>()
+                {
+                    {"$ad_type", adType},
+                    {"$ad_unit_id", adUnitId},
+                    {"$adn_type", GEPlatformManager.GetTrackMiniGameAdShowType()}
+                };
+                GE_PropertiesChecker.MergeProperties(otherProperties, properties);
+                Track("$AdShow", properties);
+                Flush();
+            }
         }
         
         /// <summary>
@@ -683,6 +772,399 @@ namespace GravityEngine
         }
 
         /// <summary>
+        /// 上报微信AppStart：
+        /// </summary>
+        public static object TrackMPAppStart()
+        {
+            return GEPlatformManager.TrackMPAppStart();
+        }
+
+        /// <summary>
+        /// 上报微信LoadFinish：
+        /// </summary>
+        public static object TrackMPLoadFinish()
+        {
+            object result = GEPlatformManager.TrackMPLoadFinish();
+            Track("$LoadFinish");
+            Flush();
+            return result;
+        }
+
+
+        /// <summary>
+        /// 上报微信Subscribe：
+        /// </summary>
+        public static object TrackMPSubscribe()
+        {
+            object result = GEPlatformManager.TrackMPSubscribe();
+            Track("$Subscribe");
+            Flush();
+            return result;
+        }
+
+        /// <summary>
+        /// 上报微信TutorialStart：
+        /// </summary>
+        public static object TrackMPTutorialStart()
+        {
+            object result = GEPlatformManager.TrackMPTutorialStart();
+            Track("$TutorialStart");
+            Flush();
+            return result;
+        }
+
+        /// <summary>
+        /// 上报微信 进入关卡：
+        //level_id 必须 进入的关卡ID
+        //enter_level_name 游戏关卡名称
+        //game_mode 进入的游戏模式（名称）
+        //enter_level_id 进入的关卡进度（0-1之间，保留两位小数）
+        //coin_amount 进入关卡时的金币数
+        //stamina_value 进入关卡时的体力值
+        //level_value 进入关卡时的等级值
+        /// </summary>
+        public static object TrackMPLevelEnter(int level_id, string enter_level_name = "", string game_mode = "", float enter_level_id = -1.0f, int chapter_id = -1, int coin_amount = -1, int stamina_value
+= -1, int level_value = -1)
+        {
+            Dictionary<string, object> properties = new Dictionary<string, object>()
+                        {
+                            {"level_id", level_id},
+                        };
+            Dictionary<string, object> geproperties = new Dictionary<string, object>()
+                        {
+                            {"$level_id", level_id},
+                        };
+            if (enter_level_name.Length > 0)
+            {
+                properties.Add("enter_level_name", enter_level_name);
+                geproperties.Add("$enter_level_name", enter_level_name);
+            }
+            if (game_mode.Length > 0)
+            {
+                properties.Add("game_mode", game_mode);
+                geproperties.Add("$game_mode", game_mode);
+            }
+            if (enter_level_id >= 0)
+            {
+                properties.Add("enter_level_id", enter_level_id);
+                geproperties.Add("$enter_level_id", enter_level_id);
+            }
+            if (chapter_id >= 0)
+            {
+                properties.Add("chapter_id", chapter_id);
+                geproperties.Add("$chapter_id", chapter_id);
+            }
+            if (coin_amount >= 0)
+            {
+                properties.Add("coin_amount", coin_amount);
+                geproperties.Add("$coin_amount", coin_amount);
+            }
+            if (stamina_value >= 0)
+            {
+                properties.Add("stamina_value", stamina_value);
+                geproperties.Add("$stamina_value", stamina_value);
+            }
+            if (level_value >= 0)
+            {
+                properties.Add("level_value", level_value);
+                geproperties.Add("$level_value", level_value);
+            }
+            object result = GEPlatformManager.TrackMPLevelEnter(properties);
+            Track("$LevelStart", geproperties);
+            Flush();
+            return result;
+        }
+
+        /// <summary>
+        /// 上报微信 关卡退出：
+        //level_id 必须 中途退出关卡时的关卡ID
+        //ad_cnt 必须  中途退出关卡时，用户在关卡中点击、完成广告观看的次数
+        //items 使用道具信息，包括道具类型和使用数量  按照最小循环关卡*计数；道具类型枚举：例如道具是炸弹，在以下枚举列表里，对应是4，则上报4，道具是重置，则报22（https://doc.weixin.qq.com/sheet/e3_AXsA9gYhADkCNqA5dxnhFTsi1GSAA?scode=AJEAIQdfAAoiOxtxQKAXsA9gYhADk&tab=BB08J2）
+        //game_mode 进入的游戏模式（名称）
+        //enter_level_id 进入的关卡进度（0-1之间，保留两位小数）
+        //duration 中途退出关卡时的用户时长
+        //chapter_id 中途退出关卡时的章节ID
+        //coin_amount 中途退出关卡时的金币数
+        //stamina_value 中途退出关卡时的体力值
+        //level_value 中途退出关卡时的等级值
+        public static object TrackMPLevelExit(int level_id, int ad_cnt, string[] items, string game_mode = "", float enter_level_id = -1.0f, int duration = -1, int chapter_id = -1, int coin_amount
+= -1, int stamina_value = -1, int level_value = -1)
+        {
+            Dictionary<string, object> properties = new Dictionary<string, object>()
+                        {
+                            {"level_id", level_id},
+                            {"ad_cnt", ad_cnt},
+                        };
+            Dictionary<string, object> geproperties = new Dictionary<string, object>()
+                        {
+                            {"$level_id", level_id},
+                            {"$ad_cnt", ad_cnt},
+                        };
+            if (items.Length > 0)
+            {
+                properties.Add("items", items);
+                geproperties.Add("$items", items);
+            }
+            if (game_mode.Length > 0)
+            {
+                properties.Add("game_mode", game_mode);
+                geproperties.Add("$game_mode", game_mode);
+            }
+            if (enter_level_id >= 0)
+            {
+                properties.Add("enter_level_id", enter_level_id);
+                geproperties.Add("$enter_level_id", enter_level_id);
+            }
+            if (duration >= 0)
+            {
+                properties.Add("duration", duration);
+                geproperties.Add("$duration", duration);
+            }
+            if (chapter_id >= 0)
+            {
+                properties.Add("chapter_id", chapter_id);
+                geproperties.Add("$chapter_id", chapter_id);
+            }
+            if (coin_amount >= 0)
+            {
+                properties.Add("coin_amount", coin_amount);
+                geproperties.Add("$coin_amount", coin_amount);
+            }
+            if (stamina_value >= 0)
+            {
+                properties.Add("stamina_value", stamina_value);
+                geproperties.Add("$stamina_value", stamina_value);
+            }
+            if (level_value >= 0)
+            {
+                properties.Add("level_value", level_value);
+                geproperties.Add("$level_value", level_value);
+            }
+            object result = GEPlatformManager.TrackMPLevelExit(properties);
+            Track("$LevelExit", geproperties);
+            Flush();
+            return result;
+        }
+
+        /// <summary>
+        /// 上报微信 关卡失败
+        //level_id 必须 关卡失败时的关卡ID
+        //ad_cnt 必须  关卡失败时，用户在关卡中点击、完成广告观看的次数
+        //items 使用道具信息，包括道具类型和使用数量  按照最小循环关卡*计数；道具类型枚举：例如道具是炸弹，在以下枚举列表里，对应是4，则上报4，道具是重置，则报22（https://doc.weixin.qq.com/sheet/e3_AXsA9gYhADkCNqA5dxnhFTsi1GSAA?scode=AJEAIQdfAAoiOxtxQKAXsA9gYhADk&tab=BB08J2）
+        //game_mode 进入的游戏模式（名称）
+        //enter_level_id 进入的关卡进度（0-1之间，保留两位小数）
+        //duration 关卡失败时的用户时长
+        //chapter_id 关卡失败时的章节ID
+        //coin_amount 关卡失败时的金币数
+        //stamina_value 关卡失败时的体力值
+        //level_value 关卡失败时的等级值
+        public static object TrackMPLevelFail(int level_id, int ad_cnt, string[] items, string game_mode = "", float enter_level_id = -1.0f, int duration = -1, int chapter_id = -1, int coin_amount
+= -1, int stamina_value = -1, int level_value = -1)
+        {
+            Dictionary<string, object> properties = new Dictionary<string, object>()
+                        {
+                            {"level_id", level_id},
+                            {"ad_cnt", ad_cnt},
+                        };
+            Dictionary<string, object> geproperties = new Dictionary<string, object>()
+                        {
+                            {"$level_id", level_id},
+                            {"$ad_cnt", ad_cnt},
+                        };
+            if (items.Length > 0)
+            {
+                properties.Add("items", items);
+                geproperties.Add("$items", items);
+            }
+            if (game_mode.Length > 0)
+            {
+                properties.Add("game_mode", game_mode);
+                geproperties.Add("$game_mode", game_mode);
+            }
+            if (enter_level_id >= 0)
+            {
+                properties.Add("enter_level_id", enter_level_id);
+                geproperties.Add("$enter_level_id", enter_level_id);
+            }
+            if (duration >= 0)
+            {
+                properties.Add("duration", duration);
+                geproperties.Add("$duration", duration);
+            }
+            if (chapter_id >= 0)
+            {
+                properties.Add("chapter_id", chapter_id);
+                geproperties.Add("$chapter_id", chapter_id);
+            }
+            if (coin_amount >= 0)
+            {
+                properties.Add("coin_amount", coin_amount);
+                geproperties.Add("$coin_amount", coin_amount);
+            }
+            if (stamina_value >= 0)
+            {
+                properties.Add("stamina_value", stamina_value);
+                geproperties.Add("$stamina_value", stamina_value);
+            }
+            if (level_value >= 0)
+            {
+                properties.Add("level_value", level_value);
+                geproperties.Add("$level_value", level_value);
+            }
+
+            object result = GEPlatformManager.TrackMPLevelClose(properties);
+            Track("$LevelFail", geproperties);
+            Flush();
+            return result;
+        }
+
+
+
+        /// <summary>
+        /// 上报微信 关卡通过
+        //level_id 必须 关卡通关时的关卡ID
+        //ad_cnt 必须  关关卡通关时，用户在关卡中点击、完成广告观看的次数
+        //items 使用道具信息，包括道具类型和使用数量  按照最小循环关卡*计数；道具类型枚举：例如道具是炸弹，在以下枚举列表里，对应是4，则上报4，道具是重置，则报22（https://doc.weixin.qq.com/sheet/e3_AXsA9gYhADkCNqA5dxnhFTsi1GSAA?scode=AJEAIQdfAAoiOxtxQKAXsA9gYhADk&tab=BB08J2）
+        //game_mode 进入的游戏模式（名称）
+        //enter_level_id 进入的关卡进度（0-1之间，保留两位小数）
+        //duration 关卡通关时的用户时长
+        //chapter_id 关卡通关时的章节ID
+        //coin_amount 关卡通关时的金币数
+        //stamina_value 关卡通关时的体力值
+        //level_value 关卡通关时的等级值
+        public static object TrackMPLevelPass(int level_id, int ad_cnt, string[] items, string game_mode = "", float enter_level_id = -1.0f, int duration = -1, int chapter_id = -1, int coin_amount
+= -1, int stamina_value = -1, int level_value = -1)
+        {
+            Dictionary<string, object> properties = new Dictionary<string, object>()
+                        {
+                            {"level_id", level_id},
+                            {"ad_cnt", ad_cnt},
+                        };
+            Dictionary<string, object> geproperties = new Dictionary<string, object>()
+                        {
+                            {"$level_id", level_id},
+                            {"$ad_cnt", ad_cnt},
+                        };
+            if (items.Length > 0)
+            {
+                properties.Add("items", items);
+                geproperties.Add("$items", items);
+            }
+            if (game_mode.Length > 0)
+            {
+                properties.Add("game_mode", game_mode);
+                geproperties.Add("$game_mode", game_mode);
+            }
+            if (enter_level_id >= 0)
+            {
+                properties.Add("enter_level_id", enter_level_id);
+                geproperties.Add("$enter_level_id", enter_level_id);
+            }
+            if (duration >= 0)
+            {
+                properties.Add("duration", duration);
+                geproperties.Add("$duration", duration);
+            }
+            if (chapter_id >= 0)
+            {
+                properties.Add("chapter_id", chapter_id);
+                geproperties.Add("$chapter_id", chapter_id);
+            }
+            if (coin_amount >= 0)
+            {
+                properties.Add("coin_amount", coin_amount);
+                geproperties.Add("$coin_amount", coin_amount);
+            }
+            if (stamina_value >= 0)
+            {
+                properties.Add("stamina_value", stamina_value);
+                geproperties.Add("$stamina_value", stamina_value);
+            }
+            if (level_value >= 0)
+            {
+                properties.Add("level_value", level_value);
+                geproperties.Add("$level_value", level_value);
+            }
+
+            object result = GEPlatformManager.TrackMPLevelPass(properties);
+            Track("$LevelPass", geproperties);
+            Flush();
+            return result;
+        }
+
+        /// <summary>
+        /// 上报微信 广告激励点位出现 
+        //ad_placement_type 激励视频广告行为事件;例如1代表复活，2代表体力，当复活广告位出现被点击时上报1枚举见:https://doc.weixin.qq.com/sheet/e3_AQAA_gboAOACNEgqhOXynRwqq0gNv?scode=AJEAIQdfAAo7woEvatAQAA_gboAOA&tab=BB08J2
+        public static object TrackMPAdPlacementShow(int ad_placement_type)
+        {
+            object result = GEPlatformManager.TrackMPAdPlacementShow(ad_placement_type);
+            Dictionary<string, object> geproperties = new Dictionary<string, object>()
+                        {
+                            {"$ad_placement_type", ad_placement_type},
+                        };
+            Track("$IAAAdShow", geproperties);
+            Flush();
+            return result;
+        }
+
+        /// <summary>
+        /// 上报微信 广告位点击 
+        //ad_placement_type 激励视频广告行为事件;例如1代表复活，2代表体力，当复活广告位出现被点击时上报1枚举见:https://doc.weixin.qq.com/sheet/e3_AQAA_gboAOACNEgqhOXynRwqq0gNv?scode=AJEAIQdfAAo7woEvatAQAA_gboAOA&tab=BB08J2
+        public static object TrackMPAdPlacementClick(int ad_placement_type)
+        {
+            object result = GEPlatformManager.TrackMPAdPlacementClick(ad_placement_type);
+            Dictionary<string, object> geproperties = new Dictionary<string, object>()
+                        {
+                            {"$ad_placement_type", ad_placement_type},
+                        };
+            Track("$IAAAdClick", geproperties);
+            Flush();
+            return result;
+        }
+
+        /// <summary>
+        /// 上报微信 广告播放结束
+        //ad_placement_type 激励视频广告行为事件;例如1代表复活，2代表体力，当复活广告位出现被点击时上报1枚举见:https://doc.weixin.qq.com/sheet/e3_AQAA_gboAOACNEgqhOXynRwqq0gNv?scode=AJEAIQdfAAo7woEvatAQAA_gboAOA&tab=BB08J2
+        public static object TrackMPAdPlacementVideoFinish(int ad_placement_type)
+        {
+            object result = GEPlatformManager.TrackMPAdPlacementVideoFinish(ad_placement_type);
+            Dictionary<string, object> geproperties = new Dictionary<string, object>()
+                        {
+                            {"$ad_placement_type", ad_placement_type},
+                        };
+            Track("$IAAAdFinish", geproperties);
+            Flush();
+            return result;
+        }
+
+
+        /// <summary>
+        /// 上报微信 广告曝光
+        //ad_type 广告位类型; 1-激励视频，2-插屏，3-格子，4-banner
+        public static object TrackMPAdPlacementVideoShow(int ad_type)
+        {
+            object result = GEPlatformManager.TrackMPAdPlacementVideoShow(ad_type);
+            Dictionary<string, object> geproperties = new Dictionary<string, object>()
+                        {
+                            {"$ad_type", ad_type+""},
+                        };
+            Track("$IAAAdPlay", geproperties);
+            Flush();
+            return result;
+        }
+
+
+        /// <summary>
+        /// 上报其他微信自定义事件：
+        /// </summary>
+        public static object TrackMPEvent(string eventName, Dictionary<string, object> properties = null)
+        {
+            return GEPlatformManager.TrackMPEvent(eventName, properties);
+        }
+
+
+
+        /// <summary>
         /// track 简单事件. 该事件会先缓存在本地，达到触发上报条件或者主动调用 Flush 时会上报到服务器.
         /// </summary>
         /// <param name="eventName">事件名称</param>
@@ -700,7 +1182,7 @@ namespace GravityEngine
         {
             if (tracking_enabled)
             {
-                return GravityEngineWrapper.Track(eventName, properties);
+                return GravityWrapperManager.Track(eventName, properties);
             }
             else
             {
@@ -727,7 +1209,7 @@ namespace GravityEngine
         {
             if (tracking_enabled)
             {
-                return GravityEngineWrapper.Track(eventName, properties, date, timeZone);
+                return GravityWrapperManager.Track(eventName, properties, date, timeZone);
             }
             else
             {
@@ -749,7 +1231,7 @@ namespace GravityEngine
         {
             if (tracking_enabled)
             {
-                GravityEngineWrapper.Flush();
+                GravityWrapperManager.Flush();
             }
             else
             {
@@ -801,7 +1283,7 @@ namespace GravityEngine
         {
             if (tracking_enabled)
             {
-                GravityEngineWrapper.SetSuperProperties(superProperties);
+                GravityWrapperManager.SetSuperProperties(superProperties);
             }
             else
             {
@@ -823,7 +1305,7 @@ namespace GravityEngine
         {
             if (tracking_enabled)
             {
-                GravityEngineWrapper.UnsetSuperProperty(property);
+                GravityWrapperManager.UnsetSuperProperty(property);
             }
             else
             {
@@ -845,7 +1327,7 @@ namespace GravityEngine
         {
             if (tracking_enabled)
             {
-                return GravityEngineWrapper.GetSuperProperties();
+                return GravityWrapperManager.GetSuperProperties();
             }
 
             return null;
@@ -859,7 +1341,7 @@ namespace GravityEngine
         {
             if (tracking_enabled)
             {
-                return GravityEngineWrapper.GetCurrentPresetProperties();
+                return GravityWrapperManager.GetCurrentPresetProperties();
             }
 
             return null;
@@ -872,7 +1354,7 @@ namespace GravityEngine
         {
             if (tracking_enabled)
             {
-                GravityEngineWrapper.ClearSuperProperty();
+                GravityWrapperManager.ClearSuperProperty();
             }
             else
             {
@@ -894,7 +1376,7 @@ namespace GravityEngine
         {
             if (tracking_enabled)
             {
-                GravityEngineWrapper.SetDynamicSuperProperties(dynamicSuperProperties);
+                GravityWrapperManager.SetDynamicSuperProperties(dynamicSuperProperties);
             }
             else
             {
@@ -916,7 +1398,7 @@ namespace GravityEngine
         {
             if (tracking_enabled)
             {
-                GravityEngineWrapper.TimeEvent(eventName);
+                GravityWrapperManager.TimeEvent(eventName);
             }
             else
             {
@@ -938,7 +1420,7 @@ namespace GravityEngine
         {
             if (tracking_enabled)
             {
-                GravityEngineWrapper.UserSet(properties);
+                GravityWrapperManager.UserSet(properties);
             }
             else
             {
@@ -961,7 +1443,7 @@ namespace GravityEngine
         {
             if (tracking_enabled)
             {
-                GravityEngineWrapper.UserSet(properties, dateTime);
+                GravityWrapperManager.UserSet(properties, dateTime);
             }
             else
             {
@@ -995,7 +1477,7 @@ namespace GravityEngine
         {
             if (tracking_enabled)
             {
-                GravityEngineWrapper.UserUnset(properties);
+                GravityWrapperManager.UserUnset(properties);
             }
             else
             {
@@ -1018,7 +1500,7 @@ namespace GravityEngine
         {
             if (tracking_enabled)
             {
-                GravityEngineWrapper.UserUnset(properties, dateTime);
+                GravityWrapperManager.UserUnset(properties, dateTime);
             }
             else
             {
@@ -1040,7 +1522,7 @@ namespace GravityEngine
         {
             if (tracking_enabled)
             {
-                GravityEngineWrapper.UserSetOnce(properties);
+                GravityWrapperManager.UserSetOnce(properties);
             }
             else
             {
@@ -1063,7 +1545,7 @@ namespace GravityEngine
         {
             if (tracking_enabled)
             {
-                GravityEngineWrapper.UserSetOnce(properties, dateTime);
+                GravityWrapperManager.UserSetOnce(properties, dateTime);
             }
             else
             {
@@ -1099,7 +1581,7 @@ namespace GravityEngine
         {
             if (tracking_enabled)
             {
-                GravityEngineWrapper.UserAdd(properties);
+                GravityWrapperManager.UserAdd(properties);
             }
             else
             {
@@ -1122,7 +1604,7 @@ namespace GravityEngine
         {
             if (tracking_enabled)
             {
-                GravityEngineWrapper.UserAdd(properties, dateTime);
+                GravityWrapperManager.UserAdd(properties, dateTime);
             }
             else
             {
@@ -1158,7 +1640,7 @@ namespace GravityEngine
         {
             if (tracking_enabled)
             {
-                GravityEngineWrapper.UserNumberMin(properties);
+                GravityWrapperManager.UserNumberMin(properties);
             }
             else
             {
@@ -1181,7 +1663,7 @@ namespace GravityEngine
         {
             if (tracking_enabled)
             {
-                GravityEngineWrapper.UserNumberMin(properties, dateTime);
+                GravityWrapperManager.UserNumberMin(properties, dateTime);
             }
             else
             {
@@ -1217,7 +1699,7 @@ namespace GravityEngine
         {
             if (tracking_enabled)
             {
-                GravityEngineWrapper.UserNumberMax(properties);
+                GravityWrapperManager.UserNumberMax(properties);
             }
             else
             {
@@ -1240,7 +1722,7 @@ namespace GravityEngine
         {
             if (tracking_enabled)
             {
-                GravityEngineWrapper.UserNumberMax(properties, dateTime);
+                GravityWrapperManager.UserNumberMax(properties, dateTime);
             }
             else
             {
@@ -1262,7 +1744,7 @@ namespace GravityEngine
         {
             if (tracking_enabled)
             {
-                GravityEngineWrapper.UserAppend(properties);
+                GravityWrapperManager.UserAppend(properties);
             }
             else
             {
@@ -1285,7 +1767,7 @@ namespace GravityEngine
         {
             if (tracking_enabled)
             {
-                GravityEngineWrapper.UserAppend(properties, dateTime);
+                GravityWrapperManager.UserAppend(properties, dateTime);
             }
             else
             {
@@ -1307,7 +1789,7 @@ namespace GravityEngine
         {
             if (tracking_enabled)
             {
-                GravityEngineWrapper.UserUniqAppend(properties);
+                GravityWrapperManager.UserUniqAppend(properties);
             }
             else
             {
@@ -1330,7 +1812,7 @@ namespace GravityEngine
         {
             if (tracking_enabled)
             {
-                GravityEngineWrapper.UserUniqAppend(properties, dateTime);
+                GravityWrapperManager.UserUniqAppend(properties, dateTime);
             }
             else
             {
@@ -1351,7 +1833,7 @@ namespace GravityEngine
         {
             if (tracking_enabled)
             {
-                GravityEngineWrapper.UserDelete();
+                GravityWrapperManager.UserDelete();
             }
             else
             {
@@ -1372,7 +1854,7 @@ namespace GravityEngine
         {
             if (tracking_enabled)
             {
-                GravityEngineWrapper.UserDelete(dateTime);
+                GravityWrapperManager.UserDelete(dateTime);
             }
             else
             {
@@ -1394,7 +1876,7 @@ namespace GravityEngine
         {
             if (tracking_enabled)
             {
-                GravityEngineWrapper.SetNetworkType(networkType);
+                GravityWrapperManager.SetNetworkType(networkType);
             }
             else
             {
@@ -1416,7 +1898,7 @@ namespace GravityEngine
         {
             if (tracking_enabled)
             {
-                return GravityEngineWrapper.GetDeviceId();
+                return GravityWrapperManager.GetDeviceId();
             }
 
             return null;
@@ -1430,7 +1912,7 @@ namespace GravityEngine
         {
             if (tracking_enabled)
             {
-                GravityEngineWrapper.SetTrackStatus(status);
+                GravityWrapperManager.SetTrackStatus(status);
             }
             else
             {
@@ -1450,7 +1932,7 @@ namespace GravityEngine
         /// <param name="timestamp">当前 Unix timestamp, 单位 毫秒</param>
         public static void CalibrateTime(long timestamp)
         {
-            GravityEngineWrapper.CalibrateTime(timestamp);
+            GravityWrapperManager.CalibrateTime(timestamp);
         }
 
         /// <summary>
@@ -1462,7 +1944,7 @@ namespace GravityEngine
         /// <param name="timestamp">可用的 NTP 服务器地址</param>
         public static void CalibrateTimeWithNtp(string ntpServer)
         {
-            GravityEngineWrapper.CalibrateTimeWithNtp(ntpServer);
+            GravityWrapperManager.CalibrateTimeWithNtp(ntpServer);
         }
 
         /// <summary>
@@ -1489,173 +1971,149 @@ namespace GravityEngine
         public static void StartGravityEngine(string accessToken, string clientId="default_placeholder", SDKRunMode mode = SDKRunMode.NORMAL,
             string channel = "base_channel", bool enableImei = true, bool enableOaid = true, bool enableAndroidId = true, bool enableMAC = true)
         {
-            SDKTimeZone timeZone = SDKTimeZone.Local;
-            Token token = new Token(accessToken, clientId, channel, mode, timeZone, null, enableImei, enableOaid, enableAndroidId, enableMAC);
+            Token token = new Token(accessToken, clientId, channel);
+            token.mode = mode;
+            token.enableIMEI = enableImei;
+            token.enableOAID = enableOaid;
+            token.enableAndroidId = enableAndroidId;
+            token.enableMAC = enableMAC;
+
+            StartGravityEngine(token);
+        }
+
+
+
+        /// <summary>
+        /// 海外 手动初始化 Gravity Engine SDK
+        /// </summary>
+        /// <param name="accessToken">项目token</param>
+        /// <param name="clientId">用户唯一ID，iOS产品若采用引力自动获取 idfv 的方案，则这里传固定值default_placeholder即可；否则传入您自定义的 clientId</param>
+        /// <param name="mode">SDK运行模式（默认为正常模式）</param>
+        /// <param name="channel">用户渠道（选填）</param>
+        ///
+        /// <param name="isGDPRArea">是否欧盟地区（选填）如果你的应用在欧盟地区运营，则需要符合欧盟隐私保护法律的规定（关于GDPR），请务必在用户拒绝采集设备敏感信息时设置</param>
+        /// <param name="isCoppaEnabled">如果您的应用需要符合《儿童在线隐私权保护法》(COPPA) 规定，设置 isCoppaEnabled = true（选填）</param>
+        /// <param name="isKidsAppEnabled">如果您的应用会定向到不满 13 周岁的儿童，则需要将其标记为儿童应用 (Kids App)，设置 isKidsAppEnabled = true（选填）</param>
+        /// <param name="adPersonalizationEnabled">如果你的应用在欧盟地区运营并且在Google投放您的应用，请务必将用户是否允许Google将其数据用于个性化广告的意见结果传入该属性，以确保您符合Google对欧盟用户意见征求政策的新政策仅支持 （选填）Android</param>
+        /// <param name="adUserDataEnabled">如果你的应用在欧盟地区运营并且在Google投放您的应用，请务必将用户是否同意将其数据发送到Google的意见结果传入该属性，以确保您符合Google对欧盟用户意见征求政策的新政策（选填）仅支持 Android</param>
+        /// <param name="fbAppID">如果你的应用需要在Facebook平台推广，需要进行Facebook归因，需要设置对应Facebook APP ID（选填）仅支持 Android</param>
+        public static void StartOverseaGravityEngine(string accessToken, string clientId = "default_placeholder", SDKRunMode mode = SDKRunMode.NORMAL,
+            string channel = "base_channel", bool isGDPRArea = false, bool isCoppaEnabled = false, bool isKidsAppEnabled = false, bool adPersonalizationEnabled = false, bool adUserDataEnabled = false, string fbAppID = "")
+        {
+            Token token = new Token(accessToken, clientId, channel);
+            token.mode = mode;
+            token.isGDPRArea = isGDPRArea;
+            token.isCoppaEnabled = isCoppaEnabled;
+            token.isKidsAppEnabled = isKidsAppEnabled;
+            token.adPersonalizationEnabled = adPersonalizationEnabled;
+            token.adUserDataEnabled = adUserDataEnabled;
+            token.fbAppID = fbAppID;
+
+            StartGravityEngine(token);
+        }
+
+        /// <summary>
+        /// 使用可视化配置 初始化 Gravity Engine SDK
+        /// <param name="clientId">用户唯一ID，iOS产品若采用引力自动获取 idfv 的方案，则这里传固定值default_placeholder即可；否则传入您自定义的 clientId</param>
+        /// <param name="adPersonalizationEnabled">如果你的应用在欧盟地区运营并且在Google投放您的应用，请务必将用户是否允许Google将其数据用于个性化广告的意见结果传入该属性，以确保您符合Google对欧盟用户意见征求政策的新政策仅支持 （选填）Android</param>
+        /// <param name="adUserDataEnabled">如果你的应用在欧盟地区运营并且在Google投放您的应用，请务必将用户是否同意将其数据发送到Google的意见结果传入该属性，以确保您符合Google对欧盟用户意见征求政策的新政策（选填）仅支持 Android</param>
+        /// </summary>
+        /// 
+        public static void AutoStartGravityEngine(string clientId = "default_placeholder", bool adPersonalizationEnabled = false,bool adUserDataEnabled = false)
+        {
+            if (string.IsNullOrEmpty(GravityEngineAutoConfig.accessToken))
+            {
+                throw new ApplicationException("[GravityEngineSDK] 检测到自动初始化配置未设置，请先在《引力引擎/SDK启动参数配置》进行设置！！！！！！！");
+            }
+
+            //读取配置文件，创建token
+            Token token = new Token(GravityEngineAutoConfig.accessToken,clientId, GravityEngineAutoConfig.channel);
+            if (GravityEngineAutoConfig.debugMode)
+            {
+                token.mode = SDKRunMode.DEBUG;
+            }
+            if (GravityEngineAutoConfig.isChina)
+            {
+                token.enableIMEI = GravityEngineAutoConfig.enableIMEI;
+                token.enableOAID = GravityEngineAutoConfig.enableOAID;
+                token.enableAndroidId = GravityEngineAutoConfig.enableAndroidId;
+                token.enableMAC = GravityEngineAutoConfig.enableMAC;
+            }
+            else
+            {
+                token.isGDPRArea = GravityEngineAutoConfig.isGDPRArea;
+                token.isCoppaEnabled = GravityEngineAutoConfig.isCoppaEnabled;
+                token.isKidsAppEnabled = GravityEngineAutoConfig.isKidsAppEnabled;
+                token.adPersonalizationEnabled = adPersonalizationEnabled;
+                token.adUserDataEnabled = adUserDataEnabled;
+                token.fbAppID = GravityEngineAutoConfig.fbAppID;
+            }
+            token.isChina = GravityEngineAutoConfig.isChina;
+            token.foregroundSessionThreshold = int.Parse(GravityEngineAutoConfig.foregroundSessionThreshold);
+
+            List<AndroidClientIdType> mClientIdPriorityOrder = new List<AndroidClientIdType>();
+            foreach(string typeStr in GravityEngineAutoConfig.mClientIdPriorityOrder)
+            {
+                if(typeStr == "OAID")
+                {
+                    mClientIdPriorityOrder.Add(AndroidClientIdType.OAID);
+                }
+                else if (typeStr == "ANDROID_ID")
+                {
+                    mClientIdPriorityOrder.Add(AndroidClientIdType.ANDROID_ID);
+                }
+            }
+            token.mClientIdPriorityOrder = mClientIdPriorityOrder;
+
+
+            StartGravityEngine(token);
+        }
+
+        /// <summary>
+        /// 初始化 Gravity Engine SDK
+        /// </summary>
+        /// <param name="token">多项目配置，详情参见 GravityEngineAPI.Token</param>
+        public static void StartGravityEngine(Token token)
+        {
             Token[] tokens = new Token[1];
             tokens[0] = token;
             StartGravityEngine(tokens);
+        }
+
+        private static void StartGravityEngine(Token[] tokens = null)
+        {
+            start_called = true;
+            if (GEMiniPlatformWechat.NeedCheckWechatDirect())
+            {
+                GEMiniPlatformWechat.CheckDirect(() =>
+                {
+                    RealStartGravityEngine(tokens);
+                });
+            }
+            else
+            {
+                RealStartGravityEngine(tokens);
+            }
         }
 
         /// <summary>
         /// 初始化 Gravity Engine SDK，仅内部调用
         /// </summary>
         /// <param name="token">多项目配置，详情参见 GravityEngineAPI.Token</param>
-        private static void StartGravityEngine(Token[] tokens = null)
+        private static void RealStartGravityEngine(Token[] tokens = null)
         {
             tracking_enabled = true;
 
+            if(_sGravityEngineAPI == null)
+            {
+                new GameObject("GravityEngine", typeof(GravityEngineAPI));
+            }
             if (tracking_enabled)
             {
-#if GRAVITY_WECHAT_GAME_MODE || GRAVITY_BILIBILI_GAME_MODE || GRAVITY_MEITUAN_GAME_MODE
-                // 从微信SDK获取属性信息
-                var systemInfo = WX.GetSystemInfoSync();
-                // 提前设置设备属性信息
-                GravitySDKDeviceInfo.SetWechatGameDeviceInfo(new WechatGameDeviceInfo()
-                {
-                    SDKVersion = systemInfo.SDKVersion, // 微信SDK版本号
-                    brand = systemInfo.brand,
-                    language = systemInfo.language,
-                    model = systemInfo.model,
-                    platform = systemInfo.platform,
-                    screenHeight = systemInfo.screenHeight,
-                    screenWidth = systemInfo.screenWidth,
-                    system = systemInfo.system,
-                    version = systemInfo.version, // 微信版本号
-                });
-#elif GRAVITY_BYTEDANCE_GAME_MODE
-                // 从抖音SDK获取属性信息
-                var systemInfo = StarkSDK.API.GetSystemInfo();
-                // 提前设置设备属性信息
-                GravitySDKDeviceInfo.SetWechatGameDeviceInfo(new WechatGameDeviceInfo()
-                {
-                    SDKVersion = systemInfo.sdkVersion, // 客户端基础库版本
-                    brand = systemInfo.brand,
-                    language = systemInfo.language,
-                    model = systemInfo.model,
-                    platform = systemInfo.platform,
-                    screenHeight = systemInfo.screenHeight,
-                    screenWidth = systemInfo.screenWidth,
-                    system = systemInfo.system,
-                    version = systemInfo.hostVersion, // 宿主版本号
-                });
-#elif GRAVITY_BYTEDANCE_TT_GAME_MODE
-                // 从抖音SDK获取属性信息
-                var systemInfo = TT.GetSystemInfo();
-                // 提前设置设备属性信息
-                GravitySDKDeviceInfo.SetWechatGameDeviceInfo(new WechatGameDeviceInfo()
-                {
-                    SDKVersion = systemInfo.sdkVersion, // 客户端基础库版本
-                    brand = systemInfo.brand,
-                    language = systemInfo.language,
-                    model = systemInfo.model,
-                    platform = systemInfo.platform,
-                    screenHeight = systemInfo.screenHeight,
-                    screenWidth = systemInfo.screenWidth,
-                    system = systemInfo.system,
-                    version = systemInfo.hostVersion, // 宿主版本号
-                });
-#elif GRAVITY_KUAISHOU_GAME_MODE && KUAISHOU_BELOW_121_VERSION
-                // 从快手SDK获取属性信息
-                KSSystemInfo ks = KSConfig.kSSystemInfo;
-                if (ks!=null)
-                {
-                    // 提前设置设备属性信息
-                    GravitySDKDeviceInfo.SetWechatGameDeviceInfo(new WechatGameDeviceInfo()
-                    {
-                        version = ks.version, // 快手版本号
-                    });    
-                }
-                else
-                {
-                    Debug.Log("kuaishou system info is null");
-                }
-#elif GRAVITY_KUAISHOU_WEBGL_GAME_MODE
-                // 从快手SDK获取属性信息
-                var systemInfoStr = KS.GetSystemInfoSync();
-                // 提前设置设备属性信息
-                GravitySDKDeviceInfo.SetWechatGameDeviceInfo(new WechatGameDeviceInfo()
-                {
-                    SDKVersion = systemInfoStr.version,
-                    language = systemInfoStr.language,
-                    model = systemInfoStr.model,
-                    platform = systemInfoStr.platform,
-                    screenHeight = systemInfoStr.screenHeight,
-                    screenWidth = systemInfoStr.screenWidth,
-                    system = systemInfoStr.system,
-                });
-#elif GRAVITY_ALIPAY_GAME_MODE
-                // 从支付宝SDK获取属性信息
-                var systemInfoStr = AlipaySDK.API.GetSystemInfoSync();
-                Dictionary<string, object> systemInfoDict = GE_MiniJson.Deserialize(systemInfoStr);
-                var envInfoStr = AlipaySDK.API.GetAlipayEnv();
-                Dictionary<string, object> envInfoDict = GE_MiniJson.Deserialize(envInfoStr);
-                // 提前设置设备属性信息
-                GravitySDKDeviceInfo.SetWechatGameDeviceInfo(new WechatGameDeviceInfo()
-                {
-                    SDKVersion = envInfoDict["version"] as string, // 微信SDK版本号
-                    language = envInfoDict["language"] as string,
-                    model = systemInfoDict["model"] as string,
-                    platform = envInfoDict["platform"] as string,
-                    screenHeight = Convert.ToDouble(envInfoDict["screenHeight"]),
-                    screenWidth = Convert.ToDouble(envInfoDict["screenWidth"]),
-                    system = systemInfoDict["system"] as string,
-                    version = envInfoDict["clientVersion"] as string // 支付宝版本号
-                });
-#elif GRAVITY_OPPO_GAME_MODE
-                // 从OPPO快游戏SDK获取属性信息
-                QG.GetSystemInfo((systemInfo) =>
-                {
-                    GravitySDKDeviceInfo.SetWechatGameDeviceInfo(new WechatGameDeviceInfo()
-                    {
-                        SDKVersion = systemInfo.data.COREVersion, // 抖音SDK版本号
-                        brand = systemInfo.data.brand,
-                        language = systemInfo.data.language,
-                        model = systemInfo.data.model,
-                        platform = systemInfo.data.platformVersionName,
-                        // screenHeight = systemInfo.data.screenHeight,
-                        // screenWidth = systemInfo.data.screenWidth,
-                        system = systemInfo.data.system,
-                    });
-                });
-#elif GRAVITY_HUAWEI_GAME_MODE
-                GetSystemInfoSuccessResult systemInfo = QG.GetSystemInfoSync();
-                GravitySDKDeviceInfo.SetWechatGameDeviceInfo(new WechatGameDeviceInfo()
-                {
-                    SDKVersion = systemInfo.COREVersion, // 渲染引擎版本号
-                    brand = systemInfo.brand,
-                    language = systemInfo.language,
-                    model = systemInfo.model,
-                    platform = systemInfo.platform,
-                    screenHeight = systemInfo.screenHeight,
-                    screenWidth = systemInfo.screenWidth,
-                    system = systemInfo.system,
-                    version = systemInfo.version,
-                });
-#elif GRAVITY_XIAOMI_GAME_MODE
-                bool successSystemInfo;
-                if (SyncHelper.GetSystemInfoSync(out successSystemInfo, out outData))
-                {
-                    if (successSystemInfo)
-                    {
-                        GravitySDKDeviceInfo.SetWechatGameDeviceInfo(new WechatGameDeviceInfo()
-                        {
-                            brand = outData.brand,
-                            language = outData.language,
-                            model = outData.model,
-                            screenHeight = outData.screenHeight,
-                            screenWidth = outData.screenWidth,
-                            system = outData.system,
-                            version = outData.platformVersionName,
-                        });
-                    }
-                }
-                else
-                {
-                    Debug.Log("Failed to get system info.");
-                }
-#endif
+                GEPlatformManager.SetDeviceInfo();
+
                 GE_PublicConfig.GetPublicConfig();
-                GravityEngineWrapper.SetVersionInfo(GE_PublicConfig.LIB_VERSION);
+                GravityWrapperManager.SetVersionInfo(GE_PublicConfig.LIB_VERSION);
                 if (tokens == null)
                 {
                     tokens = _sGravityEngineAPI.tokens;
@@ -1666,183 +2124,51 @@ namespace GravityEngine
                     for (int i = 0; i < tokens.Length; i++)
                     {
                         Token token = tokens[i];
-                        GE_Log.EnableLog(token.mode == SDKRunMode.DEBUG);
-                        GravityEngineWrapper.EnableLog(token.mode == SDKRunMode.DEBUG);
+                        if(token.mode == SDKRunMode.DEBUG)
+                        {
+                            GE_Log.EnableLog(true);
+                            GravityWrapperManager.EnableLog(true);
+                        }
+                        send_sdk_error_to_ge = token.enableCrashToGe;
+                        send_sdk_error_to_3d = token.enableCrashTo3D;
 
-                        GE_Log.d("GravityEngine start with SERVER_URL: " + GravitySDKConstant.SERVER_URL +
-                                 ", MODE: " + token.mode);
+                        GravitySDKConstant.SET_SERVER_URL(token.isChina);
+                        GravityHelper.GravityHost = GravitySDKConstant.SERVER_URL;
 
                         GravityHelper.InitSDK(token.accessToken, token.clientId, token.channel);
-                        GravityEngineWrapper.ShareInstance(token, _sGravityEngineAPI);
-                        GravityEngineWrapper.SetNetworkType(_sGravityEngineAPI.networkType);
-#if GRAVITY_WECHAT_GAME_MODE && ENABLE_TENCENT_SDK_TRACK
-                        DnSdkHelper.SetOpenId(token.clientId);
-                        GravityHelper.QueryAppConfigInfo(GravityHelper.UseParams());
-#endif
+                        GravityWrapperManager.ShareInstance(token, _sGravityEngineAPI);
+                        GravityWrapperManager.SetNetworkType(_sGravityEngineAPI.networkType);
+
+                        GEPlatformManager.SetOpenId(token.clientId);
+                        GE_Log.d("GravityEngine start with SERVER_URL: " + GravitySDKConstant.SERVER_URL +
+                                 ", MODE: " + token.mode);
                     }
                 }
-                catch
+                catch(Exception e)
                 {
+                    Debug.LogError("gravity GravityEngine error:" + e);
                     // ignored
                 }
-#if GRAVITY_WECHAT_GAME_MODE || GRAVITY_BILIBILI_GAME_MODE || GRAVITY_MEITUAN_GAME_MODE
-                // 记录小程序/小游戏启动事件，在StartEngine并且获取network_type之后调用
-                WX.GetNetworkType(new GetNetworkTypeOption()
-                {
-                    success = (result) => { GravitySDKDeviceInfo.SetNetworkType(result.networkType); },
-                    fail = (result) => { GravitySDKDeviceInfo.SetNetworkType("error"); },
-                    complete = (result) =>
-                    {
-                        LaunchOptionsGame launchOptionsSync = WX.GetLaunchOptionsSync();
-                        TrackMPLaunch(launchOptionsSync.query, "" + launchOptionsSync.scene);
-                        ReportSuperProperties("" + launchOptionsSync.scene);
-                    }
-                });
-#elif GRAVITY_BYTEDANCE_GAME_MODE
-                // 抖音小游戏不需要提前获取网络状态，直接使用unity自带的即可
-                LaunchOption launchOptionsSync = StarkSDK.API.GetLaunchOptionsSync();
-                if (launchOptionsSync == null)
-                {
-                    TrackMPLaunch(new Dictionary<string, string>(), "");
-                    ReportSuperProperties("");
-                }
-                else
-                {
-                    TrackMPLaunch(launchOptionsSync.Query, launchOptionsSync.Scene);
-                    ReportSuperProperties(launchOptionsSync.Scene);
-                }
-#elif GRAVITY_BYTEDANCE_TT_GAME_MODE
-                // 抖音小游戏不需要提前获取网络状态，直接使用unity自带的即可
-                LaunchOption launchOptionsSync = TT.GetLaunchOptionsSync();
-                if (launchOptionsSync == null)
-                {
-                    TrackMPLaunch(new Dictionary<string, string>(), "");
-                    ReportSuperProperties("");
-                }
-                else
-                {
-                    TrackMPLaunch(launchOptionsSync.Query, launchOptionsSync.Scene);
-                    ReportSuperProperties(launchOptionsSync.Scene);
-                }
-#elif GRAVITY_KUAISHOU_GAME_MODE
-                // 快手小游戏不需要提前获取网络状态，直接使用unity自带的即可
-#if KUAISHOU_BELOW_121_VERSION
-            KSOutLaunchOption launchOption = KSConfig.kSOutLaunchOption;
-#else 
-            KSOutLaunchOption launchOption = KS.GetLaunchOptionSync();
-#endif
-                if (launchOption!=null)
-                {
-                    TrackMPLaunch(launchOption.query, launchOption.from);
-                    ReportSuperProperties(launchOption.from);    
-                }
-                else
-                {
-                    Debug.Log("kuaishou launch option is null");
-                    TrackMPLaunch(new Dictionary<string, string>(), "fake");
-                }
-#elif GRAVITY_KUAISHOU_WEBGL_GAME_MODE
-                LaunchOptions launchOptions = KS.GetLaunchOptionSync();
-                if (launchOptions != null)
-                {
-                    TrackMPLaunch(launchOptions.query, launchOptions.scene);
-                    ReportSuperProperties(launchOptions.from);
-                }
-                else
-                {
-                    Debug.Log("kuaishou webgl launch option is null");
-                    TrackMPLaunch(new Dictionary<string, string>(), "fake");
-                }
-#elif GRAVITY_ALIPAY_GAME_MODE
-                // 支付宝小游戏不需要提前获取网络状态，直接使用unity自带的即可
-                AlipaySDK.API.GetLaunchOptions((result) =>
-                {
-                    // TEST  {"query":{"key1":"value1","key2":"value2"},"referrerInfo":{}}
-                    Debug.Log("alipay launch info is " + result);
-                    if (result!=null)
-                    {
-                        Dictionary<string, object> launchOptionDict = GE_MiniJson.Deserialize(result);
-                        if (launchOptionDict.TryGetValue("query", out var queryStr))
-                        {
-                            Dictionary<string, object> queryDict = (Dictionary<string, object>) queryStr;
-                            TrackMPLaunch(ConvertToDictionary(queryDict), "");
-                            ReportSuperProperties("");
-                            Debug.Log("alipay query got");
-                        }
-                        else
-                        {
-                            queryStr = "{}";
-                            TrackMPLaunch(new Dictionary<string, string>(), "");
-                            Debug.Log("alipay query is null");
-                        }
-                    }
-                    else
-                    {
-                        Debug.Log("alipay launch option is null");
-                        TrackMPLaunch(new Dictionary<string, string>(), "fake");
-                    }
-                });
-#elif GRAVITY_OPPO_GAME_MODE
-                var launchStr =  QG.GetEnterOptionsSync();
-                Debug.Log("oppo quickgame launch info is " + launchStr);
-                if (launchStr!=null)
-                {
-                    Dictionary<string, object> launchOptionDict = GE_MiniJson.Deserialize(launchStr);
-                    if (launchOptionDict.TryGetValue("query", out var queryStr))
-                    {
-                        Dictionary<string, object> queryDict = (Dictionary<string, object>) queryStr;
-                        TrackMPLaunch(ConvertToDictionary(queryDict), "");
-                        ReportSuperProperties("");
-                        Debug.Log("oppo quickgame query got");
-                    }
-                    else
-                    {
-                        queryStr = "{}";
-                        TrackMPLaunch(new Dictionary<string, string>(), "");
-                        Debug.Log("oppo quickgame query is null");
-                    }
-                }
-                else
-                {
-                    Debug.Log("oppo quickgame launch option is null");
-                    TrackMPLaunch(new Dictionary<string, string>(), "fake");
-                }
-#elif GRAVITY_HUAWEI_GAME_MODE
-                GetLaunchOptionsSyncResult result = QG.GetLaunchOptionsSync();
-                if (result!=null)
-                {
-                    Dictionary<string, object> queryDict = GE_MiniJson.Deserialize(result.query);
-                    TrackMPLaunch(ConvertToDictionary(queryDict), "");
-                    ReportSuperProperties("");
-                    Debug.Log("huawei quickgame query got");
-                }
-                else
-                {
-                    Debug.Log("huawei quickgame launch option is null");
-                    TrackMPLaunch(new Dictionary<string, string>(), "fake");
-                }
-#elif GRAVITY_XIAOMI_GAME_MODE
-                Dictionary<string, string> launchQuery = new Dictionary<string, string>();
-                QGLaunchInfo launchInfo = MiGetOptions.Instance.GetLaunchOptionsSync();
-                var launchScene = "" + launchInfo.scene;
-                if (launchInfo.query.type != null)
-                {
-                    launchQuery["type"] = launchInfo.query.type;
-                }
-                
-                TrackMPLaunch(launchQuery, launchScene);
-                ReportSuperProperties(launchScene);
-#endif
+
+                GEPlatformManager.OnGravityStartEnd();
             }
 
             //上报缓存事件
             FlushEventCaches();
+            if (GEPlatformManager.isMiniGame())
+            {
+                EnableAutoTrack(AUTO_TRACK_EVENTS.MINI_GAME_ALL);
+            }
+            else
+            {
+                EnableAutoTrack(AUTO_TRACK_EVENTS.APP_ALL);
+            }
         }
-        
-        static Dictionary<string, string> ConvertToDictionary(Dictionary<string, object> sourceDict)
+
+        public static Dictionary<string, string> ConvertToDictionary(Dictionary<string, object> sourceDict)
         {
             var targetDict = new Dictionary<string, string>();
-            
+
             if (sourceDict == null) return targetDict;
             foreach (var kvp in sourceDict)
             {
@@ -1855,7 +2181,7 @@ namespace GravityEngine
         }
 
         // 统计启动场景
-        private static void ReportSuperProperties(string scene)
+        public static void ReportSuperProperties(string scene)
         {
             string latestStartupTimestamp;
             
@@ -1892,8 +2218,23 @@ namespace GravityEngine
         public static void Initialize(string clientId, string nickname, int version, string openId,
             bool enableSyncAttribution, IInitializeCallback initializeCallback)
         {
-            GravityEngineWrapper.Initialize(clientId, nickname, version, openId, enableSyncAttribution,
-                initializeCallback);
+            if(start_called && !tracking_enabled && GEMiniPlatformWechat.NeedCheckWechatDirect())
+            {
+                //如果微信小游戏且开启了直玩检测，且调用了StartGravityEngine，但没StartGravityEngine完成，稍后调用Initialize
+                System.Reflection.MethodBase method = System.Reflection.MethodBase.GetCurrentMethod();
+                object[] parameters = new object[] { clientId, nickname, version, openId, enableSyncAttribution,
+                    initializeCallback };
+                eventCaches.Add(new Dictionary<string, object>()
+                {
+                    {"method", method},
+                    {"parameters", parameters}
+                });
+            }
+            else
+            {
+                GravityWrapperManager.Initialize(clientId, nickname, version, openId, enableSyncAttribution,
+                    initializeCallback);
+            }
         }
 
         /// <summary>
@@ -1901,22 +2242,44 @@ namespace GravityEngine
         /// </summary>
         /// <param name="enableAsa"></param>                是否开启asa归因
         /// <param name="clientId"></param>                 用户在引力系统中的唯一标识，如果传空字符串，则引力 sdk 内部会采集一个稳定的 idfv 作为用户唯一标识（推荐传空字符串）
-        /// <param name="caid1MD5"></param>                 当前用户中广协 ID 的 md5 hash（20230330 版本）（可为空）
-        /// <param name="caid2MD5"></param>                 当前用户中广协 ID 的 md5 hash（20220111 版本）（可为空）
+        /// <param name="caid"></param>                     当前用户中广协 ID 返回的 的 json 数组 string 
         /// <param name="enableSyncAttribution"></param>    是否开启同步获取归因信息，具体请参考同步归因：https://doc.gravity-engine.com/turbo-integrated/sync_attribution.html
         /// <param name="channel"></param>                  当前包渠道
         /// <param name="initializeCallback"></param>       网络回调，其他方法均需在回调成功之后才可正常使用
         /// <exception cref="ArgumentException"></exception>
-        public static void InitializeIOS(bool enableAsa, string clientId, string caid1MD5, string caid2MD5, bool enableSyncAttribution, string channel, IInitializeCallback initializeCallback)
+        public static void InitializeIOS(bool enableAsa, string clientId, string caid, bool enableSyncAttribution, string channel, IInitializeCallback initializeCallback)
         {
-            GravityEngineWrapper.InitializeIOS(enableAsa, clientId, caid1MD5, caid2MD5, enableSyncAttribution, channel, initializeCallback);
-        }
-        
-        public static string GetCurrentClientID()
-        {
-            return GravityEngineWrapper.GetCurrentClientID();
+            GravityWrapperManager.InitializeIOS(enableAsa, clientId, caid, enableSyncAttribution, channel, initializeCallback);
         }
 
+        public static void InitializeIOS(bool enableAsa, string clientId, string caid1MD5, string caid2MD5, bool enableSyncAttribution, string channel, IInitializeCallback initializeCallback)
+        {
+            GravityWrapperManager.InitializeIOS(enableAsa, clientId, caid1MD5, caid2MD5, enableSyncAttribution, channel, initializeCallback);
+        }
+
+        //更新用户基础信息
+        //channel str 用户初始渠道 不传视为不更新
+        //name str 用户初始名称 不传视为不更新
+        //version int 用户初始应用版本，不传视为不更新
+        //openid str 用户openid 不传视为不更新
+        //unionid str 用户unionid 不传视为不更新
+        public static void UpdateUserInfo(Dictionary<string, object> properties)
+        {
+            GravityWrapperManager.UpdateUserInfo(properties);
+        }
+
+        public static string GetCurrentClientID()
+        {
+            return GravityWrapperManager.GetCurrentClientID();
+        }
+
+
+        public enum DryRunEventEmpty
+        {
+            NOT_ENABLE,
+            NO_IN_POSTBACK_WINDOW,
+            SKIP
+        }
         /// <summary>
         /// 演练模式查询接口，查询当前traceId对应的演练结果
         /// </summary>
@@ -1925,7 +2288,7 @@ namespace GravityEngine
         /// <param name="queryDryRunCallback"></param>
         public static void DryRunEventWithCallback(string traceId, Dictionary<string, object> otherParams, IQueryDryRunCallback queryDryRunCallback)
         {
-            GravityEngineWrapper.QueryDryRunInfo(traceId, otherParams, queryDryRunCallback);
+            GravityWrapperManager.QueryDryRunInfo(traceId, otherParams, queryDryRunCallback);
         }
         
         public static void test()
@@ -1986,6 +2349,7 @@ namespace GravityEngine
 
         private static GravityEngineAPI _sGravityEngineAPI;
         private static bool tracking_enabled = false;
+        private static bool start_called = false;
         private static List<Dictionary<string, object>> eventCaches = new List<Dictionary<string, object>>();
 
         #endregion

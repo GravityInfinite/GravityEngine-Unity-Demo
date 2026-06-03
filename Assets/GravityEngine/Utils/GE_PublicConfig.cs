@@ -1,8 +1,11 @@
 using UnityEngine;
 using System;
 using System.IO;
-using System.Xml;
 using System.Collections.Generic;
+
+#if !GRAVITY_CONFIG_XML_READER_CLOSE
+using System.Xml;
+#endif
 
 namespace GravityEngine.Utils
 {
@@ -32,10 +35,11 @@ namespace GravityEngine.Utils
         public static bool DisableCSharpException = false;
         public static List<string> DisPresetProperties = new List<string>();
 
-        public static readonly string LIB_VERSION = "5.0.26";
+        public static readonly string LIB_VERSION = "5.0.39";
 
         public static void GetPublicConfig()
         {
+#if !GRAVITY_CONFIG_XML_READER_CLOSE
             TextAsset textAsset = Resources.Load<TextAsset>("ge_public_config");
             if (textAsset != null && !string.IsNullOrEmpty(textAsset.text))
             {
@@ -71,6 +75,7 @@ namespace GravityEngine.Utils
                     }
                 }
             }
+#endif
         }
     }
 }

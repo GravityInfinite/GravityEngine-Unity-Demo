@@ -10,6 +10,7 @@ using UnityEngine;
 using UnityEngine.Networking;
 using System.Collections;
 using GravitySDK.PC.GravityTurbo;
+using GravityEngine;
 
 namespace GravitySDK.PC.Request
 {
@@ -40,14 +41,34 @@ namespace GravitySDK.PC.Request
             string content = GravitySDKJSON.Serialize(param);
             byte[] contentCompressed = Encoding.UTF8.GetBytes(content);
             byte[] zipData = UnityWebRequestMgr.GzipData(contentCompressed);
-
+            bool hasZip = false;
+            if (zipData != null && zipData.Length > 0)
+            {
+                hasZip = true;
+            }
+            if (!hasZip)
+            {
+                uri = UnityWebRequestMgr.AppendGzipStatus(uri);
+            }
             using (UnityWebRequest webRequest = new UnityWebRequest(uri, "POST"))
             {
                 webRequest.timeout = 30;
                 webRequest.SetRequestHeader("Content-Type", "application/json");
                 webRequest.SetRequestHeader("Turbo-Debug-Mode", "1");
-                webRequest.SetRequestHeader("Gravity-Content-Compress", "gzip");
-                webRequest.uploadHandler = (UploadHandler) new UploadHandlerRaw(zipData);
+                if (hasZip)
+                {
+                    webRequest.SetRequestHeader("Gravity-Content-Compress", "gzip");
+                    webRequest.uploadHandler = (UploadHandler)new UploadHandlerRaw(zipData);
+                }
+                else
+                {
+                    webRequest.uploadHandler = (UploadHandler)new UploadHandlerRaw(contentCompressed);
+                }
+
+                webRequest.SetRequestHeader("GE_LIB", GravitySDKAppInfo.LibName());
+                webRequest.SetRequestHeader("GE_LIB_VERSION", GravitySDKAppInfo.LibVersion());
+                webRequest.SetRequestHeader("GE_TOKEN", GravityHelper.GetAccessToken());
+
                 webRequest.downloadHandler = (DownloadHandler) new DownloadHandlerBuffer();
 
                 GravitySDKLogger.Print("Post event: " + content + "\n  Request URL: " + uri);
@@ -63,6 +84,17 @@ namespace GravitySDK.PC.Request
                     case UnityWebRequest.Result.DataProcessingError:
                     case UnityWebRequest.Result.ProtocolError:
                         GravitySDKLogger.Print("Error response : " + webRequest.error);
+                        string responseText = "";
+                        if (!string.IsNullOrEmpty(webRequest.downloadHandler.text))
+                        {
+                            responseText = webRequest.downloadHandler.text;
+                        }
+                        Dictionary<string, object> posthogChildProperties = new Dictionary<string, object>()
+                        {
+                            {"error", webRequest.error},
+                            {"responseStr", responseText},
+                        };
+                        GravityEngineAPI.TrackSdkError("FlushFail", posthogChildProperties);
                         break;
                     case UnityWebRequest.Result.Success:
                         GravitySDKLogger.Print("Response : " + webRequest.downloadHandler.text);
@@ -77,6 +109,17 @@ namespace GravitySDK.PC.Request
                 if (webRequest.isHttpError || webRequest.isNetworkError)
                 {
                     GravitySDKLogger.Print("Error response : " + webRequest.error);
+                    string responseText = "";
+                    if (!string.IsNullOrEmpty(webRequest.downloadHandler.text))
+                    {
+                        responseText = webRequest.downloadHandler.text;
+                    }
+                    Dictionary<string, object> posthogChildProperties = new Dictionary<string, object>()
+                    {
+                        {"error", webRequest.error},
+                        {"responseStr", responseText},
+                    };
+                    GravityEngineAPI.TrackSdkError("FlushFail", posthogChildProperties);
                 }
                 else
                 {
